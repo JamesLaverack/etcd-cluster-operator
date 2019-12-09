@@ -110,3 +110,23 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - etcd.improbable.io
+  resources:
+  - etcdrestores
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - etcd.improbable.io
+  resources:
+  - etcdrestores/status
+  verbs:
+  - get
+  - patch
+  - update

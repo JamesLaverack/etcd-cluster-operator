@@ -85,6 +85,13 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "EtcdBackupSchedule")
 		os.Exit(1)
 	}
+	if err = (&controllers.EtcdRestoreReconciler{
+		Client: mgr.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("EtcdRestore"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "EtcdRestore")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 	if os.Getenv("DISABLE_WEBHOOKS") != "" {
 		setupLog.Info("Skipping webhook set up.")
