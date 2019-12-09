@@ -49,7 +49,7 @@ type EtcdRestoreSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	Restore EtcdRestoreMethod `json:"restore"`
+	Method EtcdRestoreMethod `json:"method"`
 
 	ClusterTemplate EtcdClusterTemplate `json:"clusterTemplate"`
 }

@@ -190,7 +190,7 @@ spec:
               - clusterName
               - spec
               type: object
-            restore:
+            method:
               properties:
                 snapshot:
                   description: Restore from an etcd snapshot
@@ -243,7 +243,7 @@ spec:
               type: object
           required:
           - clusterTemplate
-          - restore
+          - method
           type: object
         status:
           description: EtcdRestoreStatus defines the observed state of EtcdRestore
