@@ -689,3 +689,76 @@ func scaleDownTests(t *testing.T, kubectl *kubectlContext) {
 	require.NoError(t, err, out)
 	assert.Equal(t, expectedValue+"\n", out)
 }
+
+func backupRestoreTest(t *testing.T, kubectl *kubectlContext) {
+	t.Log("Given a 3-node cluster.")
+	configPath := filepath.Join(*fRepoRoot, "config", "samples", "etcd_v1alpha1_etcdcluster.yaml")
+	err := kubectl.Apply("--filename", configPath)
+	require.NoError(t, err)
+
+	t.Log("Where all the nodes are up")
+	err = try.Eventually(
+		func() error {
+			out, err := kubectl.Get("etcdcluster", "my-cluster", "-o=jsonpath={.status.replicas}")
+			if err != nil {
+				return err
+			}
+			statusReplicas, err := strconv.Atoi(out)
+			if err != nil {
+				return err
+			}
+			if statusReplicas != 3 {
+				return fmt.Errorf("unexpected status.replicas. Wanted: 3, Got: %d", statusReplicas)
+			}
+			return nil
+		},
+		time.Minute*2, time.Second*10,
+	)
+	require.NoError(t, err)
+
+	t.Log("Which contains data")
+	const expectedValue = "foobarbaz"
+
+	out, err := eventuallyInCluster(
+		kubectl,
+		"set-etcd-value",
+		time.Minute*2,
+		"quay.io/coreos/etcd:v3.2.27",
+		"etcdctl", "--insecure-discovery", "--discovery-srv=my-cluster",
+		"set", "--", "foo", expectedValue,
+	)
+	require.NoError(t, err, out)
+
+	t.Log("If the cluster is scaled down")
+	const expectedReplicas = 1
+	err = kubectl.Scale("etcdcluster/my-cluster", expectedReplicas)
+	require.NoError(t, err)
+
+	t.Log("The etcdcluster.status is updated when the cluster has been resized.")
+	err = try.Eventually(
+		func() error {
+			out, err := kubectl.Get("etcdcluster", "my-cluster", "-o=jsonpath={.status.replicas}")
+			require.NoError(t, err, out)
+			statusReplicas, err := strconv.Atoi(out)
+			require.NoError(t, err, out)
+			if expectedReplicas != statusReplicas {
+				return fmt.Errorf("unexpected status.replicas. Wanted: %d, Got: %d", expectedReplicas, statusReplicas)
+			}
+			return err
+		},
+		time.Minute*5, time.Second*10,
+	)
+	require.NoError(t, err)
+
+	t.Log("And the data is still available.")
+	out, err = eventuallyInCluster(
+		kubectl,
+		"get-etcd-value",
+		time.Minute*2,
+		"quay.io/coreos/etcd:v3.2.27",
+		"etcdctl", "--insecure-discovery", "--discovery-srv=my-cluster",
+		"get", "--quorum", "--", "foo",
+	)
+	require.NoError(t, err, out)
+	assert.Equal(t, expectedValue+"\n", out)
+}

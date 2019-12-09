@@ -7,19 +7,21 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-type EtcdRestoreMethod struct {
-	// Restore from an etcd snapshot
-	// +optional
-	Snapshot *EtcdRestoreSnapshotLocation `json:"snapshot,omitempty"`
-}
+type EtcdRestoreSource struct {
 
-type EtcdRestoreSnapshotLocation struct {
+	// +optional
+	Local *EtcdRestoreSourceLocal `json:"local,omitempty"`
+
 	// GCSBucket identifies a Google Cloud Storage bucket to pull the snapshot from
 	// +optional
-	GCSBucket *EtcdRestoreGCSBucket `json:"gcsBucket,omitempty"`
+	GCSBucket *EtcdRestoreSourceGCSBucket `json:"gcsBucket,omitempty"`
 }
 
-type EtcdRestoreGCSBucket struct {
+type EtcdRestoreSourceLocal struct {
+	Directory string `json:"directory"`
+}
+
+type EtcdRestoreSourceGCSBucket struct {
 	// BucketName is the name of the storage bucket.
 	// +kubebuilder:validation:MinLength=3
 	// +kubebuilder:validation:MaxLength=222
@@ -49,8 +51,10 @@ type EtcdRestoreSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	Method EtcdRestoreMethod `json:"method"`
+	// Source describes the location the backup is pulled from
+	Source EtcdRestoreSource `json:"source"`
 
+	// ClusterTemplate describes the EtcdCluster that will eventually exist
 	ClusterTemplate EtcdClusterTemplate `json:"clusterTemplate"`
 }
 
