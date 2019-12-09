@@ -355,15 +355,17 @@ func TestE2E(t *testing.T) {
 			t.Parallel()
 			ns, cleanup := NamespaceForTest(t, kubectl)
 			defer cleanup()
-			backupTests(t, kubectl.WithT(t).WithDefaultNamespace(ns))
+			backupRestoreTests(t, kubectl.WithT(t).WithDefaultNamespace(ns))
 		})
 	})
 }
 
-func backupTests(t *testing.T, kubectl *kubectlContext) {
+func backupRestoreTests(t *testing.T, kubectl *kubectlContext) {
 	t.Log("Given a one node cluster.")
 	err := kubectl.Apply("--filename", filepath.Join(*fRepoRoot, "config", "test", "e2e", "backup", "etcdcluster.yaml"))
 	require.NoError(t, err)
+
+	clusterName := "e2e-backup-cluster"
 
 	t.Log("Containing data.")
 	out, err := eventuallyInCluster(
@@ -371,7 +373,7 @@ func backupTests(t *testing.T, kubectl *kubectlContext) {
 		"set-etcd-value",
 		time.Minute*2,
 		"quay.io/coreos/etcd:v3.2.27",
-		"etcdctl", "--insecure-discovery", "--discovery-srv=e2e-backup-cluster",
+		"etcdctl", "--insecure-discovery", fmt.Sprintf("--discovery-srv=%q", clusterName),
 		"set", "--", "foo", "bar",
 	)
 	require.NoError(t, err, out)
@@ -399,6 +401,74 @@ func backupTests(t *testing.T, kubectl *kubectlContext) {
 	require.NoError(t, err)
 	t.Log(string(out))
 	require.Len(t, strings.Split(string(out), "\n"), 2)
+
+	// So we need to be certain that when we bring the database back with a restore that its actually a restore and not
+	// a resumption of the existing database by accident. So we'll set the 'foo' key to something else *after* we've
+	// taken our backup.
+	_, err = eventuallyInCluster(
+		kubectl,
+		"set-etcd-value",
+		time.Minute*2,
+		"quay.io/coreos/etcd:v3.2.27",
+		"etcdctl", "--insecure-discovery", fmt.Sprintf("--discovery-srv=%q", clusterName),
+		"set", "--", "foo", "key-changed-after-backup!",
+	)
+	require.NoError(t, err, out)
+
+	t.Log("And the cluster is deleted")
+	err = kubectl.Delete("--filename", filepath.Join(*fRepoRoot, "config", "test", "e2e", "backup", "etcdcluster.yaml"))
+	require.NoError(t, err)
+	err = try.Eventually(func() (err error) {
+		out, err = kubectl.Get("etcdpeer", "-o=jsonpath='{.items[*].metadata.name}'")
+		if out != "" {
+			return errors.New("EtcdPeers not deleted")
+		}
+		return err
+	}, time.Minute*2, time.Second*10)
+	require.NoError(t, err)
+	err = try.Eventually(func() (err error) {
+		out, err = kubectl.Get("pod",
+			fmt.Sprintf("-l etcd.improbable.io/cluster-name=%s,app.kubernetes.io/name=etcd", clusterName),
+			"-o=jsonpath='{.items[*].metadata.name}'")
+		if out != "" {
+			return errors.New("Pods not deleted")
+		}
+		return err
+	}, time.Minute*2, time.Second*10)
+	require.NoError(t, err)
+
+	t.Log("And the PVCs are deleted")
+	err = try.Eventually(func() (err error) {
+		return kubectl.Delete("pvc",
+			fmt.Sprintf("-l etcd.improbable.io/cluster-name=%s,app.kubernetes.io/name=etcd", clusterName))
+	}, time.Minute*2, time.Second*10)
+	require.NoError(t, err)
+	err = try.Eventually(func() (err error) {
+		out, err = kubectl.Get("pvc",
+			fmt.Sprintf("-l etcd.improbable.io/cluster-name=%s,app.kubernetes.io/name=etcd", clusterName),
+			"-o=jsonpath='{.items[*].metadata.name}'")
+		if out != "" {
+			return errors.New("PVCs not deleted")
+		}
+		return err
+	}, time.Minute*2, time.Second*10)
+	require.NoError(t, err)
+
+	// At this point the cluster should be well-and-truly dead. So do the restore
+	t.Log("We restore the cluster")
+	err = kubectl.Apply("--filename", filepath.Join(*fRepoRoot, "config", "test", "e2e", "backup", "etcdcluster.yaml"))
+	require.NoError(t, err)
+
+	t.Log("And our data is still there")
+	out, err = eventuallyInCluster(
+		kubectl,
+		"get-etcd-value",
+		time.Minute*2,
+		"quay.io/coreos/etcd:v3.2.27",
+		"etcdctl", "--insecure-discovery", "--discovery-srv=cluster1",
+		"get", "--quorum")
+	require.NoError(t, err, out)
+	assert.Equal(t, "bar\n", out)
 }
 
 func webhookTests(t *testing.T, kubectl *kubectlContext) {
@@ -618,79 +688,6 @@ func persistenceTests(t *testing.T, kubectl *kubectlContext) {
 }
 
 func scaleDownTests(t *testing.T, kubectl *kubectlContext) {
-	t.Log("Given a 3-node cluster.")
-	configPath := filepath.Join(*fRepoRoot, "config", "samples", "etcd_v1alpha1_etcdcluster.yaml")
-	err := kubectl.Apply("--filename", configPath)
-	require.NoError(t, err)
-
-	t.Log("Where all the nodes are up")
-	err = try.Eventually(
-		func() error {
-			out, err := kubectl.Get("etcdcluster", "my-cluster", "-o=jsonpath={.status.replicas}")
-			if err != nil {
-				return err
-			}
-			statusReplicas, err := strconv.Atoi(out)
-			if err != nil {
-				return err
-			}
-			if statusReplicas != 3 {
-				return fmt.Errorf("unexpected status.replicas. Wanted: 3, Got: %d", statusReplicas)
-			}
-			return nil
-		},
-		time.Minute*2, time.Second*10,
-	)
-	require.NoError(t, err)
-
-	t.Log("Which contains data")
-	const expectedValue = "foobarbaz"
-
-	out, err := eventuallyInCluster(
-		kubectl,
-		"set-etcd-value",
-		time.Minute*2,
-		"quay.io/coreos/etcd:v3.2.27",
-		"etcdctl", "--insecure-discovery", "--discovery-srv=my-cluster",
-		"set", "--", "foo", expectedValue,
-	)
-	require.NoError(t, err, out)
-
-	t.Log("If the cluster is scaled down")
-	const expectedReplicas = 1
-	err = kubectl.Scale("etcdcluster/my-cluster", expectedReplicas)
-	require.NoError(t, err)
-
-	t.Log("The etcdcluster.status is updated when the cluster has been resized.")
-	err = try.Eventually(
-		func() error {
-			out, err := kubectl.Get("etcdcluster", "my-cluster", "-o=jsonpath={.status.replicas}")
-			require.NoError(t, err, out)
-			statusReplicas, err := strconv.Atoi(out)
-			require.NoError(t, err, out)
-			if expectedReplicas != statusReplicas {
-				return fmt.Errorf("unexpected status.replicas. Wanted: %d, Got: %d", expectedReplicas, statusReplicas)
-			}
-			return err
-		},
-		time.Minute*5, time.Second*10,
-	)
-	require.NoError(t, err)
-
-	t.Log("And the data is still available.")
-	out, err = eventuallyInCluster(
-		kubectl,
-		"get-etcd-value",
-		time.Minute*2,
-		"quay.io/coreos/etcd:v3.2.27",
-		"etcdctl", "--insecure-discovery", "--discovery-srv=my-cluster",
-		"get", "--quorum", "--", "foo",
-	)
-	require.NoError(t, err, out)
-	assert.Equal(t, expectedValue+"\n", out)
-}
-
-func backupRestoreTest(t *testing.T, kubectl *kubectlContext) {
 	t.Log("Given a 3-node cluster.")
 	configPath := filepath.Join(*fRepoRoot, "config", "samples", "etcd_v1alpha1_etcdcluster.yaml")
 	err := kubectl.Apply("--filename", configPath)

@@ -35,8 +35,8 @@ spec:
           description: EtcdRestoreSpec defines the desired state of EtcdRestore
           properties:
             clusterTemplate:
-              description: A template to define the cluster we'll make. The namespace
-                will be the same as this restore resource.
+              description: ClusterTemplate describes the EtcdCluster that will eventually
+                exist
               properties:
                 clusterName:
                   description: ClusterName is the name of the EtcdCluster that will
@@ -190,60 +190,63 @@ spec:
               - clusterName
               - spec
               type: object
-            method:
+            source:
+              description: Source describes the location the backup is pulled from
               properties:
-                snapshot:
-                  description: Restore from an etcd snapshot
+                gcsBucket:
+                  description: GCSBucket identifies a Google Cloud Storage bucket
+                    to pull the snapshot from
                   properties:
-                    gcsBucket:
-                      description: GCSBucket identifies a Google Cloud Storage bucket
-                        to pull the snapshot from
+                    bucketName:
+                      description: BucketName is the name of the storage bucket.
+                      maxLength: 222
+                      minLength: 3
+                      type: string
+                    credentials:
+                      description: Credentials holds the method of obtaining credentials
+                        that will be provided to the Google Cloud APIs in order to
+                        write backup data.
                       properties:
-                        bucketName:
-                          description: BucketName is the name of the storage bucket.
-                          maxLength: 222
-                          minLength: 3
-                          type: string
-                        credentials:
-                          description: Credentials holds the method of obtaining credentials
-                            that will be provided to the Google Cloud APIs in order
-                            to write backup data.
+                        secretKeySelector:
+                          description: Credentials are taken from the key of a Kubernetes
+                            secret.
                           properties:
-                            secretKeySelector:
-                              description: Credentials are taken from the key of a
-                                Kubernetes secret.
-                              properties:
-                                key:
-                                  description: The key of the secret to select from.  Must
-                                    be a valid secret key.
-                                  type: string
-                                name:
-                                  description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                    TODO: Add other useful fields. apiVersion, kind,
-                                    uid?'
-                                  type: string
-                                optional:
-                                  description: Specify whether the Secret or its key
-                                    must be defined
-                                  type: boolean
-                              required:
-                              - key
-                              type: object
+                            key:
+                              description: The key of the secret to select from.  Must
+                                be a valid secret key.
+                              type: string
+                            name:
+                              description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                TODO: Add other useful fields. apiVersion, kind, uid?'
+                              type: string
+                            optional:
+                              description: Specify whether the Secret or its key must
+                                be defined
+                              type: boolean
+                          required:
+                          - key
                           type: object
-                        objectPath:
-                          description: ObjectPath is the path to the object inside
-                            the bucket.
-                          minLength: 1
-                          type: string
-                      required:
-                      - bucketName
-                      - objectPath
                       type: object
+                    objectPath:
+                      description: ObjectPath is the path to the object inside the
+                        bucket.
+                      minLength: 1
+                      type: string
+                  required:
+                  - bucketName
+                  - objectPath
+                  type: object
+                local:
+                  properties:
+                    directory:
+                      type: string
+                  required:
+                  - directory
                   type: object
               type: object
           required:
           - clusterTemplate
-          - method
+          - source
           type: object
         status:
           description: EtcdRestoreStatus defines the observed state of EtcdRestore

@@ -1,0 +1,18 @@
+apiVersion: etcd.improbable.io/v1alpha1
+kind: EtcdRestore
+metadata:
+  name: e2e-restore
+spec:
+  source:
+    local:
+      path: /tmp/backups
+  clusterTemplate:
+    clusterName: e2e-backup-cluster
+    spec:
+      replicas: 3
+      storage:
+        volumeClaimTemplate:
+          storageClassName: standard
+          resources:
+            requests:
+              storage: 100Mi
