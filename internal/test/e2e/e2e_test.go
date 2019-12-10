@@ -323,7 +323,7 @@ func TestE2E(t *testing.T) {
 	// t.Parallel is used in its test function.
 	// See https://github.com/golang/go/issues/17791#issuecomment-258527390
 	t.Run("Parallel", func(t *testing.T) {
-		t.Run("SampleCluster", func(t *testing.T) {
+/*		t.Run("SampleCluster", func(t *testing.T) {
 			t.Parallel()
 			kubectl := kubectl.WithT(t)
 			ns, cleanup := NamespaceForTest(t, kubectl)
@@ -350,7 +350,7 @@ func TestE2E(t *testing.T) {
 			ns, cleanup := NamespaceForTest(t, kubectl)
 			defer cleanup()
 			scaleDownTests(t, kubectl.WithDefaultNamespace(ns))
-		})
+		})*/
 		t.Run("Backup", func(t *testing.T) {
 			t.Parallel()
 			ns, cleanup := NamespaceForTest(t, kubectl)
@@ -371,9 +371,9 @@ func backupRestoreTests(t *testing.T, kubectl *kubectlContext) {
 	out, err := eventuallyInCluster(
 		kubectl,
 		"set-etcd-value",
-		time.Minute*2,
+		time.Minute*5,
 		"quay.io/coreos/etcd:v3.2.27",
-		"etcdctl", "--insecure-discovery", fmt.Sprintf("--discovery-srv=%q", clusterName),
+		"etcdctl", "--insecure-discovery", fmt.Sprintf("--discovery-srv=%s", clusterName),
 		"set", "--", "foo", "bar",
 	)
 	require.NoError(t, err, out)
@@ -405,23 +405,24 @@ func backupRestoreTests(t *testing.T, kubectl *kubectlContext) {
 	// So we need to be certain that when we bring the database back with a restore that its actually a restore and not
 	// a resumption of the existing database by accident. So we'll set the 'foo' key to something else *after* we've
 	// taken our backup.
+	t.Log("And there are modifications made after the backup was taken")
 	_, err = eventuallyInCluster(
 		kubectl,
-		"set-etcd-value",
+		"set-etcd-value-after-backup",
 		time.Minute*2,
 		"quay.io/coreos/etcd:v3.2.27",
-		"etcdctl", "--insecure-discovery", fmt.Sprintf("--discovery-srv=%q", clusterName),
-		"set", "--", "foo", "key-changed-after-backup!",
+		"etcdctl", "--insecure-discovery", fmt.Sprintf("--discovery-srv=%s", clusterName),
+		"set", "--", "foo", "key-changed-after-backup",
 	)
 	require.NoError(t, err, out)
 
 	t.Log("And the cluster is deleted")
-	err = kubectl.Delete("--filename", filepath.Join(*fRepoRoot, "config", "test", "e2e", "backup", "etcdcluster.yaml"))
+	err = kubectl.Delete("etcdcluster", clusterName)
 	require.NoError(t, err)
 	err = try.Eventually(func() (err error) {
 		out, err = kubectl.Get("etcdpeer", "-o=jsonpath='{.items[*].metadata.name}'")
-		if out != "" {
-			return errors.New("EtcdPeers not deleted")
+		if strings.Contains(out, clusterName) {
+			return errors.New(fmt.Sprintf("EtcdPeers not deleted, was %s", out))
 		}
 		return err
 	}, time.Minute*2, time.Second*10)
@@ -430,7 +431,7 @@ func backupRestoreTests(t *testing.T, kubectl *kubectlContext) {
 		out, err = kubectl.Get("pod",
 			fmt.Sprintf("-l etcd.improbable.io/cluster-name=%s,app.kubernetes.io/name=etcd", clusterName),
 			"-o=jsonpath='{.items[*].metadata.name}'")
-		if out != "" {
+		if strings.Contains(out, clusterName) {
 			return errors.New("Pods not deleted")
 		}
 		return err
@@ -447,7 +448,7 @@ func backupRestoreTests(t *testing.T, kubectl *kubectlContext) {
 		out, err = kubectl.Get("pvc",
 			fmt.Sprintf("-l etcd.improbable.io/cluster-name=%s,app.kubernetes.io/name=etcd", clusterName),
 			"-o=jsonpath='{.items[*].metadata.name}'")
-		if out != "" {
+		if strings.Contains(out, clusterName) {
 			return errors.New("PVCs not deleted")
 		}
 		return err
