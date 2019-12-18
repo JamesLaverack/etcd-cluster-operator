@@ -6,6 +6,7 @@ go 1.13
 replace (
 	// This hash is actually commit 3cf2f69b5738, or the v3.4.3 tag. But due to the way etcd is published and how Go's
 	// dependency management "works", we need to pin the exact commit.
+	github.com/coreos/etcd => github.com/etcd-io/etcd v0.0.0-20191023171146-3cf2f69b5738
 	go.etcd.io/etcd => github.com/etcd-io/etcd v0.0.0-20191023171146-3cf2f69b5738
 	k8s.io/api => k8s.io/api v0.0.0-20190918195907-bd6ac527cfd2
 	k8s.io/apimachinery => k8s.io/apimachinery v0.0.0-20190817020851-f2f3a405f61d
