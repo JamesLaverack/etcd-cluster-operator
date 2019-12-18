@@ -2,6 +2,10 @@ package main
 
 import (
 	"flag"
+	"github.com/improbable-eng/etcd-cluster-operator/controllers"
+	"github.com/improbable-eng/etcd-cluster-operator/internal/etcd"
+	"github.com/improbable-eng/etcd-cluster-operator/webhooks"
+	"github.com/robfig/cron/v3"
 	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -11,10 +15,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	etcdv1alpha1 "github.com/improbable-eng/etcd-cluster-operator/api/v1alpha1"
-	"github.com/improbable-eng/etcd-cluster-operator/controllers"
-	"github.com/improbable-eng/etcd-cluster-operator/internal/etcd"
-	"github.com/improbable-eng/etcd-cluster-operator/webhooks"
-	"github.com/robfig/cron/v3"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -33,87 +33,95 @@ func init() {
 func main() {
 	var metricsAddr, backupTempDir string
 	var enableLeaderElection bool
+	var restoreMode bool
 	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
 		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&backupTempDir, "backup-tmp-dir", os.TempDir(), "The directory to temporarily place backups before they are uploaded to their destination.")
+	flag.BoolVar(&restoreMode, "standalone-restore-mode", false, "Run this binary in restore mode, not operator mode. A user should never need this option.")
 	flag.Parse()
 
 	ctrl.SetLogger(zap.Logger(true))
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:             scheme,
-		MetricsBindAddress: metricsAddr,
-		LeaderElection:     enableLeaderElection,
-		Port:               9443,
-	})
-	if err != nil {
-		setupLog.Error(err, "unable to start manager")
-		os.Exit(1)
-	}
-
-	if err = (&controllers.EtcdPeerReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("EtcdPeer"),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "EtcdPeer")
-		os.Exit(1)
-	}
-	if err = (&controllers.EtcdClusterReconciler{
-		Client:   mgr.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("EtcdCluster"),
-		Recorder: mgr.GetEventRecorderFor("etcdcluster-reconciler"),
-		Etcd:     &etcd.ClientEtcdAPI{},
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "EtcdCluster")
-		os.Exit(1)
-	}
-	if err = (&controllers.EtcdBackupReconciler{
-		Client:  mgr.GetClient(),
-		Log:     ctrl.Log.WithName("controllers").WithName("EtcdBackup"),
-		TempDir: backupTempDir,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "EtcdBackup")
-		os.Exit(1)
-	}
-	if err = (&controllers.EtcdBackupScheduleReconciler{
-		Client:      mgr.GetClient(),
-		Log:         ctrl.Log.WithName("controllers").WithName("EtcdBackupSchedule"),
-		CronHandler: cron.New(),
-		Schedules:   map[string]controllers.Schedule{},
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "EtcdBackupSchedule")
-		os.Exit(1)
-	}
-	if err = (&controllers.EtcdRestoreReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("EtcdRestore"),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "EtcdRestore")
-		os.Exit(1)
-	}
-	// +kubebuilder:scaffold:builder
-	if os.Getenv("DISABLE_WEBHOOKS") != "" {
-		setupLog.Info("Skipping webhook set up.")
+	if restoreMode {
+		// In restore mode we follow a *completely* different code path and perform a restore.
 	} else {
-		setupLog.Info("Setting up webhooks.")
-		if err = (&webhooks.EtcdCluster{
-			Log: ctrl.Log.WithName("webhooks").WithName("EtcdCluster"),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "Unable to create webhook.", "webhook", "EtcdCluster")
+		// Without restore mode, we run as the operator
+		mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+			Scheme:             scheme,
+			MetricsBindAddress: metricsAddr,
+			LeaderElection:     enableLeaderElection,
+			Port:               9443,
+		})
+		if err != nil {
+			setupLog.Error(err, "unable to start manager")
 			os.Exit(1)
 		}
-		if err = (&webhooks.EtcdPeer{
-			Log: ctrl.Log.WithName("webhooks").WithName("EtcdPeer"),
+
+		if err = (&controllers.EtcdPeerReconciler{
+			Client: mgr.GetClient(),
+			Log:    ctrl.Log.WithName("controllers").WithName("EtcdPeer"),
 		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "Unable to create webhook.", "webhook", "EtcdPeer")
+			setupLog.Error(err, "unable to create controller", "controller", "EtcdPeer")
+			os.Exit(1)
+		}
+		if err = (&controllers.EtcdClusterReconciler{
+			Client:   mgr.GetClient(),
+			Log:      ctrl.Log.WithName("controllers").WithName("EtcdCluster"),
+			Recorder: mgr.GetEventRecorderFor("etcdcluster-reconciler"),
+			Etcd:     &etcd.ClientEtcdAPI{},
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "EtcdCluster")
+			os.Exit(1)
+		}
+		if err = (&controllers.EtcdBackupReconciler{
+			Client:  mgr.GetClient(),
+			Log:     ctrl.Log.WithName("controllers").WithName("EtcdBackup"),
+			TempDir: backupTempDir,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "EtcdBackup")
+			os.Exit(1)
+		}
+		if err = (&controllers.EtcdBackupScheduleReconciler{
+			Client:      mgr.GetClient(),
+			Log:         ctrl.Log.WithName("controllers").WithName("EtcdBackupSchedule"),
+			CronHandler: cron.New(),
+			Schedules:   map[string]controllers.Schedule{},
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "EtcdBackupSchedule")
+			os.Exit(1)
+		}
+		if err = (&controllers.EtcdRestoreReconciler{
+			Client: mgr.GetClient(),
+			Log:    ctrl.Log.WithName("controllers").WithName("EtcdRestore"),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "EtcdRestore")
+			os.Exit(1)
+		}
+		// +kubebuilder:scaffold:builder
+		if os.Getenv("DISABLE_WEBHOOKS") != "" {
+			setupLog.Info("Skipping webhook set up.")
+		} else {
+			setupLog.Info("Setting up webhooks.")
+			if err = (&webhooks.EtcdCluster{
+				Log: ctrl.Log.WithName("webhooks").WithName("EtcdCluster"),
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "Unable to create webhook.", "webhook", "EtcdCluster")
+				os.Exit(1)
+			}
+			if err = (&webhooks.EtcdPeer{
+				Log: ctrl.Log.WithName("webhooks").WithName("EtcdPeer"),
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "Unable to create webhook.", "webhook", "EtcdPeer")
+				os.Exit(1)
+			}
+		}
+
+		setupLog.Info("starting manager")
+		if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+			setupLog.Error(err, "problem running manager")
 			os.Exit(1)
 		}
 	}
 
-	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
-		os.Exit(1)
-	}
 }

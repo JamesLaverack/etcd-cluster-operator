@@ -20,13 +20,14 @@ import (
 // EtcdRestoreReconciler reconciles a EtcdRestore object
 type EtcdRestoreReconciler struct {
 	client.Client
-	Log logr.Logger
+	Log             logr.Logger
+	RestorePodImage string
 }
 
 // +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdrestores,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdrestores/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=core,resources=persistantvolumeclaims/status,verbs=get;update;patch;create
-
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;create
 
 func name(o metav1.Object) types.NamespacedName {
 	return types.NamespacedName{
@@ -51,6 +52,44 @@ func IsOurPVC(restore etcdv1alpha1.EtcdRestore, pvc corev1.PersistentVolumeClaim
 func IsOurPod(restore etcdv1alpha1.EtcdRestore, pod corev1.Pod) bool {
 	return pod.Labels[restoredFromLabel] == restore.Name &&
 		pod.Labels[restorePodLabel] == "true"
+}
+
+func (r *EtcdRestoreReconciler) podForRestore(restore etcdv1alpha1.EtcdRestore, pvc *corev1.PersistentVolumeClaim) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      restore.Name,
+			Namespace: restore.Namespace,
+			Labels: map[string]string{
+				restoredFromLabel: restore.Name,
+				restorePodLabel:   "true",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Volumes:       []corev1.Volume{
+				{
+					Name:         "etcd-data-directory",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: pvc.Name,
+							// We definitely need to be able to write to it.
+							ReadOnly: false,
+						},
+					},
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name:         "etcd-restore",
+					Image:        r.RestorePodImage,
+					Command:      nil,
+					Args:         nil,
+					VolumeMounts: nil,
+				},
+			},
+			// If the Pod fails we should *not* attempt to recover automatically. Leave it failed.
+			RestartPolicy: corev1.RestartPolicyNever,
+		},
+	}
 }
 
 func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
@@ -135,7 +174,11 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 	// Check to see if our restore Pod already exists. It'll have the same name as the `EtcdRestore`.
 	restorePod := corev1.Pod{}
 	err = r.Get(ctx, name(&restore), &restorePod)
-	if err != nil {
+	if apierrors.IsNotFound(err) {
+		// No Pod. Launch it!
+		err := r.Create(ctx, expectedPVC)
+		return ctrl.Result{}, err
+	} else if err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -157,7 +200,7 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 		err := r.Client.Status().Update(ctx, &restore)
 		return ctrl.Result{}, err
 	} else {
-		// This covers the "Pending" and "Running" phases. Do nothing and wait.
+		// This covers the "Pending" and "Running" phases. Do nothing and wait for the Pod to finish.
 		return ctrl.Result{}, nil
 	}
 
