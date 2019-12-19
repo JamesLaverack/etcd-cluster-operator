@@ -4,9 +4,6 @@ go 1.13
 
 // Pin k8s.io/* dependencies to kubernetes-1.15.4 to match controller-runtime v0.3.0
 replace (
-	// This hash is actually commit 3cf2f69b5738, or the v3.4.3 tag. But due to the way etcd is published and how Go's
-	// dependency management "works", we need to pin the exact commit.
-	go.etcd.io/etcd => github.com/etcd-io/etcd v0.0.0-20191023171146-3cf2f69b5738
 	k8s.io/api => k8s.io/api v0.0.0-20190918195907-bd6ac527cfd2
 	k8s.io/apimachinery => k8s.io/apimachinery v0.0.0-20190817020851-f2f3a405f61d
 	k8s.io/apiserver => k8s.io/apiserver v0.0.0-20190918200908-1e17798da8c1
@@ -15,13 +12,15 @@ replace (
 
 require (
 	cloud.google.com/go v0.38.0
+	github.com/coreos/etcd v3.3.18+incompatible
 	github.com/dustinkirkland/golang-petname v0.0.0-20190613200456-11339a705ed2
 	github.com/go-logr/logr v0.1.0
 	github.com/google/go-cmp v0.3.0
 	github.com/google/gofuzz v1.0.0
 	github.com/robfig/cron/v3 v3.0.0
 	github.com/stretchr/testify v1.4.0
-	go.etcd.io/etcd v0.0.0
+	// Not upgradable. See https://github.com/etcd-io/etcd/issues/11154
+	go.etcd.io/etcd v3.3.17+incompatible
 	go.opencensus.io v0.22.1 // indirect
 	go.uber.org/zap v1.10.0
 	google.golang.org/api v0.13.0 // indirect
