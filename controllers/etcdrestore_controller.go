@@ -2,17 +2,16 @@ package controllers
 
 import (
 	"context"
-	"errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	corev1 "k8s.io/api/core/v1"
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"k8s.io/utils/pointer"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	etcdv1alpha1 "github.com/improbable-eng/etcd-cluster-operator/api/v1alpha1"
 )
@@ -94,7 +93,7 @@ func (r *EtcdRestoreReconciler) podForRestore(restore etcdv1alpha1.EtcdRestore, 
 
 func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
-	log := r.Log.WithValues("etcdrestore", req.NamespacedName)
+	_ = r.Log.WithValues("etcdrestore", req.NamespacedName)
 
 	var restore etcdv1alpha1.EtcdRestore
 	if err := r.Get(ctx, req.NamespacedName, &restore); err != nil {
