@@ -60,6 +60,14 @@ func IsOurPod(restore etcdv1alpha1.EtcdRestore, pod corev1.Pod) bool {
 		pod.Labels[restorePodLabel] == "true"
 }
 
+func markCluster(restore etcdv1alpha1.EtcdRestore, cluster *etcdv1alpha1.EtcdCluster) {
+	cluster.Labels[restoredFromLabel] = restore.Name
+}
+
+func IsOurCluster(restore etcdv1alpha1.EtcdRestore, cluster *etcdv1alpha1.EtcdCluster) bool {
+	return cluster.Labels[restoredFromLabel] == restore.Name
+}
+
 func (r *EtcdRestoreReconciler) podForRestore(restore etcdv1alpha1.EtcdRestore, pvc *corev1.PersistentVolumeClaim) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -71,9 +79,9 @@ func (r *EtcdRestoreReconciler) podForRestore(restore etcdv1alpha1.EtcdRestore, 
 			},
 		},
 		Spec: corev1.PodSpec{
-			Volumes:       []corev1.Volume{
+			Volumes: []corev1.Volume{
 				{
-					Name:         "etcd-data-directory",
+					Name: "etcd-data-directory",
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 							ClaimName: pvc.Name,
@@ -210,13 +218,28 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 		return ctrl.Result{}, nil
 	}
 
-	
+	// We've done the restore, the pod has exited. We can now create a single node cluster to sit atop the PVC we
+	// already created.
+	cluster := etcdv1alpha1.EtcdCluster{}
+	err = r.Get(ctx, name(expectedCluster), &cluster)
+	if apierrors.IsNotFound(err) {
+		// No Cluster. Create it
+		err := r.Create(ctx, expectedCluster)
+		return ctrl.Result{}, err
+	} else if err != nil {
+		return ctrl.Result{}, err
+	}
 
-	// If the PVCs are not bound & we can't see a successful restore job
-	//   Launch a restore job pointed at it (which fails-safe on existing data)
-	// If no cluster exists, create one with 1 peer with etcd.improbable.io/restoring=true and etcd.improbable.io/restored-from=$ourname labels
-	// If a stable cluster exists with the correct restore labels and the wrong number of peers, scale it up.
-	// If a stable cluster exists with the correct restore labels and the correct number of peers, remove the restore=true label.
+	// If the cluster we just found isn't restored by us then fail completely
+	if !IsOurCluster(restore, &cluster) {
+		// TODO Report error reason
+		restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseFailed
+		err := r.Client.Status().Update(ctx, &restore)
+		return ctrl.Result{}, err
+	}
+
+	// TODO Scale cluster to desired size. Need to check that the cluster is stable *before* triggering a scale. Then
+	// wait for it to stabilise again before calling it a good job and exiting successfully.
 
 	return ctrl.Result{}, nil
 }
@@ -256,7 +279,7 @@ func podForRestore(restore etcdv1alpha1.EtcdRestore, pvcName string) *corev1.Pod
 							Value: "/var/lib/etcd",
 						},
 						{
-							Name: "RESTORE_SNAPSHOT_DIR",
+							Name:  "RESTORE_SNAPSHOT_DIR",
 							Value: "/var/snapshot",
 						},
 					},
@@ -288,13 +311,13 @@ func podForRestore(restore etcdv1alpha1.EtcdRestore, pvcName string) *corev1.Pod
 	if restore.Spec.Source.GCSBucket != nil {
 		// GCS restore
 		addEnvVar(corev1.EnvVar{
-			Name: "RESTORE_TYPE",
+			Name:  "RESTORE_TYPE",
 			Value: "GCS"})
 		addEnvVar(corev1.EnvVar{
-			Name: "RESTORE_GCS_BUCKET_NAME",
+			Name:  "RESTORE_GCS_BUCKET_NAME",
 			Value: restore.Spec.Source.GCSBucket.BucketName})
 		addEnvVar(corev1.EnvVar{
-			Name: "RESTORE_GCS_OBJECT_PATH",
+			Name:  "RESTORE_GCS_OBJECT_PATH",
 			Value: restore.Spec.Source.GCSBucket.ObjectPath})
 		addEnvVar(corev1.EnvVar{
 			Name: "RESTORE_GCS_SECRET_KEY",
@@ -309,13 +332,15 @@ func podForRestore(restore etcdv1alpha1.EtcdRestore, pvcName string) *corev1.Pod
 func clusterForRestore(restore etcdv1alpha1.EtcdRestore) *etcdv1alpha1.EtcdCluster {
 	cluster := &etcdv1alpha1.EtcdCluster{
 		ObjectMeta: v1.ObjectMeta{
-			Name: restore.Spec.ClusterTemplate.ClusterName,
+			Name:      restore.Spec.ClusterTemplate.ClusterName,
 			Namespace: restore.Namespace,
 		},
 		Spec: restore.Spec.ClusterTemplate.Spec,
 	}
 	// Always override to one. We'll make it bigger later if we need to.
 	cluster.Spec.Replicas = pointer.Int32Ptr(1)
+	// Slap a label on it so we can see it later
+	markCluster(restore, cluster)
 	return cluster
 }
 
