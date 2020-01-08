@@ -36,8 +36,10 @@ func name(o metav1.Object) types.NamespacedName {
 }
 
 const (
-	restoredFromLabel = "etcd.improbable.io/restored-from"
-	restorePodLabel   = "etcd.improbable.io/restore-pod"
+	restoreContainerName = "etcd-restore"
+	etcdRestoreImage     = "FIXME"
+	restoredFromLabel    = "etcd.improbable.io/restored-from"
+	restorePodLabel      = "etcd.improbable.io/restore-pod"
 )
 
 func markPVC(restore etcdv1alpha1.EtcdRestore, pvc *corev1.PersistentVolumeClaim) {
@@ -46,6 +48,11 @@ func markPVC(restore etcdv1alpha1.EtcdRestore, pvc *corev1.PersistentVolumeClaim
 
 func IsOurPVC(restore etcdv1alpha1.EtcdRestore, pvc corev1.PersistentVolumeClaim) bool {
 	return pvc.Labels[restoredFromLabel] == restore.Name
+}
+
+func markPod(restore etcdv1alpha1.EtcdRestore, pod *corev1.Pod) {
+	pod.Labels[restoredFromLabel] = restore.Name
+	pod.Labels[restorePodLabel] = "true"
 }
 
 func IsOurPod(restore etcdv1alpha1.EtcdRestore, pod corev1.Pod) bool {
@@ -175,7 +182,7 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 	err = r.Get(ctx, name(&restore), &restorePod)
 	if apierrors.IsNotFound(err) {
 		// No Pod. Launch it!
-		err := r.Create(ctx, expectedPVC)
+		err := r.Create(ctx, podForRestore(restore, pvc.Name))
 		return ctrl.Result{}, err
 	} else if err != nil {
 		return ctrl.Result{}, err
@@ -212,6 +219,91 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 	// If a stable cluster exists with the correct restore labels and the correct number of peers, remove the restore=true label.
 
 	return ctrl.Result{}, nil
+}
+
+func podForRestore(restore etcdv1alpha1.EtcdRestore, pvcName string) *corev1.Pod {
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      restore.Name,
+			Namespace: restore.Namespace,
+		},
+		Spec: corev1.PodSpec{
+			Volumes: []corev1.Volume{
+				{
+					Name: "etcd-data",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: pvcName,
+						},
+					},
+				},
+				{
+					// This is scratch space to download the snapshot file into
+					Name: "snapshot",
+					VolumeSource: corev1.VolumeSource{
+						EmptyDir: nil,
+					},
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name: restoreContainerName,
+					// Use the same etcd image that we actually run etcd with.
+					Image: etcdRestoreImage,
+					Env: []corev1.EnvVar{
+						{
+							Name:  "RESTORE_ETCD_DATA_DIR",
+							Value: "/var/lib/etcd",
+						},
+						{
+							Name: "RESTORE_SNAPSHOT_DIR",
+							Value: "/var/snapshot",
+						},
+					},
+					VolumeMounts: []corev1.VolumeMount{
+						{
+							Name:      "etcd-data",
+							ReadOnly:  false,
+							MountPath: "/var/lib/etcd",
+						},
+						{
+							Name:      "snapshot",
+							ReadOnly:  false,
+							MountPath: "/var/snapshot",
+						},
+					},
+				},
+			},
+			// If we fail, we fail
+			RestartPolicy: corev1.RestartPolicyNever,
+		},
+	}
+
+	// Create a helper to append environment variables to the restore container.
+	addEnvVar := func(ev corev1.EnvVar) {
+		// We know there's only one container and it's the first in the list
+		pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, ev)
+	}
+
+	if restore.Spec.Source.GCSBucket != nil {
+		// GCS restore
+		addEnvVar(corev1.EnvVar{
+			Name: "RESTORE_TYPE",
+			Value: "GCS"})
+		addEnvVar(corev1.EnvVar{
+			Name: "RESTORE_GCS_BUCKET_NAME",
+			Value: restore.Spec.Source.GCSBucket.BucketName})
+		addEnvVar(corev1.EnvVar{
+			Name: "RESTORE_GCS_OBJECT_PATH",
+			Value: restore.Spec.Source.GCSBucket.ObjectPath})
+		addEnvVar(corev1.EnvVar{
+			Name: "RESTORE_GCS_SECRET_KEY",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: restore.Spec.Source.GCSBucket.Credentials.SecretKeyRef}})
+	}
+
+	markPod(restore, &pod)
+	return &pod
 }
 
 func clusterForRestore(restore etcdv1alpha1.EtcdRestore) *etcdv1alpha1.EtcdCluster {
