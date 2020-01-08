@@ -12,11 +12,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	etcdclient "go.etcd.io/etcd/client"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	etcdv1alpha1 "github.com/improbable-eng/etcd-cluster-operator/api/v1alpha1"
@@ -212,7 +214,10 @@ func (s *controllerSuite) testClusterController(t *testing.T) {
 		teardownFunc, namespace := s.setupTest(t)
 		defer teardownFunc()
 
+		const expectedReplicas = 3
+
 		etcdCluster := test.ExampleEtcdCluster(namespace)
+		etcdCluster.Spec.Replicas = pointer.Int32Ptr(expectedReplicas)
 
 		err := s.k8sClient.Create(s.ctx, etcdCluster)
 		require.NoError(t, err, "failed to create EtcdCluster resource")
@@ -272,12 +277,18 @@ func (s *controllerSuite) testClusterController(t *testing.T) {
 			// Assert on peers
 			peers := &etcdv1alpha1.EtcdPeerList{}
 			err = try.Eventually(func() error {
-				return s.k8sClient.List(s.ctx, peers, &client.ListOptions{
+				err := s.k8sClient.List(s.ctx, peers, &client.ListOptions{
 					Namespace: namespace,
 				})
+				if err != nil {
+					return err
+				}
+				if len(peers.Items) != expectedReplicas {
+					return fmt.Errorf("wrong number of peers. expected: %d, actual: %d", expectedReplicas, len(peers.Items))
+				}
+				return nil
 			}, time.Second*5, time.Millisecond*500)
 			require.NoError(t, err)
-			require.Lenf(t, peers.Items, 3, "wrong number of peers: %#v", peers)
 
 			expectedInitialCluster := make([]etcdv1alpha1.InitialClusterMember, len(peers.Items))
 			for i, peer := range peers.Items {
@@ -362,6 +373,71 @@ func (s *controllerSuite) testClusterController(t *testing.T) {
 			require.NoError(t, err)
 		})
 	})
+
+	t.Run("PodAnnotations", func(t *testing.T) {
+		teardownFunc, namespace := s.setupTest(t)
+		defer teardownFunc()
+
+		etcdCluster := test.ExampleEtcdCluster(namespace)
+
+		expectedAnnotations := map[string]string{
+			"foo":                "bar",
+			"prometheus.io/path": "/_metrics",
+		}
+
+		etcdCluster.Spec.PodTemplate = &etcdv1alpha1.EtcdPodTemplateSpec{
+			Metadata: &etcdv1alpha1.EtcdPodTemplateObjectMeta{
+				Annotations: expectedAnnotations,
+			},
+		}
+
+		err := s.k8sClient.Create(s.ctx, etcdCluster)
+		require.NoError(t, err, "failed to create EtcdCluster resource")
+
+		// Apply defaults here so that our expected object has all the same
+		// defaults as those used in the Reconcile function
+		etcdCluster.Default()
+
+		// Mock out the etcd API with one that always fails - i.e., we're always in 'bootstrap' mode
+		s.etcd = &AlwaysFailEtcdAPI{}
+
+		t.Run("AppliesAnnotationsToPod", func(t *testing.T) {
+			// Search for etcd pods using the clusterLabel
+			replicaSetList := &appsv1.ReplicaSetList{}
+			err = try.Eventually(func() error {
+				err := s.k8sClient.List(s.ctx, replicaSetList,
+					client.InNamespace(namespace),
+				)
+				t.Log(fmt.Sprintf("%v", replicaSetList))
+				if len(replicaSetList.Items) != 3 {
+					return errors.New(fmt.Sprintf("Wrong number of etcd Replica Sets. Had %d wanted %d", len(replicaSetList.Items), 3))
+				}
+				return err
+			}, time.Second*5, time.Millisecond*500)
+			require.NoError(t, err)
+
+			for _, replicaSet := range replicaSetList.Items {
+				// Assert that our expected annotations are in there. In particular we explicitly allow other
+				// annotations to be added beyond the ones we asked for. So a direct comparison of the underlying
+				// map[string]string objects is inappropriate.
+				for expectedName, expectedValue := range expectedAnnotations {
+					foundAnnotation := false
+					for actualName, actualValue := range replicaSet.Spec.Template.Annotations {
+						if expectedName == actualName {
+							foundAnnotation = true
+							require.Equal(t, expectedValue, actualValue, "Annotation value has been changed")
+							break
+						}
+					}
+					if !foundAnnotation {
+						t.Errorf("Could not find annotation %s on ReplicaSet %s's pod spec", expectedName, replicaSet.Name)
+					}
+				}
+			}
+		})
+
+	})
+
 }
 
 func assertOwnedByCluster(t *testing.T, etcdCluster *etcdv1alpha1.EtcdCluster, obj metav1.Object) {
