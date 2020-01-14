@@ -5,7 +5,7 @@ metadata:
 spec:
   source:
     local:
-      path: /tmp/backups
+      directory: /tmp/backups
   clusterTemplate:
     clusterName: e2e-backup-cluster
     spec:

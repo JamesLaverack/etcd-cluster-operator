@@ -176,7 +176,42 @@ func buildOperator(t *testing.T, ctx context.Context) (imageTar string, err erro
 	return imageTar, nil
 }
 
-func installOperator(t *testing.T, kubectl *kubectlContext, kind *cluster.Context, imageTar string) {
+func buildRestoreAgent(t *testing.T, ctx context.Context) (imageTar string, err error) {
+	t.Log("Building the restore agent")
+	// Tag for running this test, for naming resources.
+	restoreagentImage := "etcd-restore-agent:test"
+
+	// Build the agent.
+	t.Logf("Repo Root %s", *fRepoRoot)
+	cmd := exec.CommandContext(ctx, "docker", "build", "--file=restoreagent.Dockerfile", "-t", restoreagentImage, *fRepoRoot)
+	cmd.Dir = *fRepoRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w Output: %s", err, out)
+	}
+
+	// Bundle the image to a tar.
+	tmpDir, err := ioutil.TempDir("", "etcd-cluster-operator-e2e-test")
+	if err != nil {
+		return "", err
+	}
+
+	imageTar = filepath.Join(tmpDir, "etcd-resotreagent.tar")
+
+	t.Log("Exporting the agent image")
+	out, err = exec.CommandContext(ctx, "docker", "save", "-o", imageTar, restoreagentImage).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w Output: %s", err, out)
+	}
+	return imageTar, nil
+}
+
+func installOperator(t *testing.T,
+	kubectl *kubectlContext,
+	kind *cluster.Context,
+	imageTar string,
+	restoreAgentImageTar string,
+) {
 	t.Log("Installing cert-manager")
 	err := kubectl.Apply("--validate=false", "--filename=https://github.com/jetstack/cert-manager/releases/download/v0.11.0/cert-manager.yaml")
 	require.NoError(t, err)
@@ -197,6 +232,19 @@ func installOperator(t *testing.T, kubectl *kubectlContext, kind *cluster.Contex
 	require.NoError(t, err)
 	for _, node := range nodes {
 		err := node.LoadImageArchive(imageFile)
+		require.NoError(t, err)
+	}
+
+	restoreAgentImageFile, err := os.Open(restoreAgentImageTar)
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, restoreAgentImageFile.Close(), "failed to close restoreagent image tar")
+	}()
+	// Load the built image into the Kind cluster.
+	t.Log("Loading image in to Kind cluster")
+	require.NoError(t, err)
+	for _, node := range nodes {
+		err := node.LoadImageArchive(restoreAgentImageFile)
 		require.NoError(t, err)
 	}
 
@@ -226,9 +274,10 @@ func installOperator(t *testing.T, kubectl *kubectlContext, kind *cluster.Contex
 func setupKind(t *testing.T, ctx context.Context, stopped chan struct{}) *kubectlContext {
 	ctx, cancel := context.WithCancel(ctx)
 	var (
-		kind     *cluster.Context
-		imageTar string
-		wg       sync.WaitGroup
+		kind                 *cluster.Context
+		imageTar             string
+		restoreAgentImageTar string
+		wg                   sync.WaitGroup
 	)
 	stoppedKind := make(chan struct{})
 	go func() {
@@ -240,6 +289,16 @@ func setupKind(t *testing.T, ctx context.Context, stopped chan struct{}) *kubect
 		defer wg.Done()
 		var err error
 		imageTar, err = buildOperator(t, ctx)
+		if err != nil {
+			assert.NoError(t, err)
+			cancel()
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var err error
+		restoreAgentImageTar, err = buildRestoreAgent(t, ctx)
 		if err != nil {
 			assert.NoError(t, err)
 			cancel()
@@ -262,7 +321,7 @@ func setupKind(t *testing.T, ctx context.Context, stopped chan struct{}) *kubect
 		configPath: kind.KubeConfigPath(),
 	}
 
-	installOperator(t, kubectl, kind, imageTar)
+	installOperator(t, kubectl, kind, imageTar, restoreAgentImageTar)
 
 	return kubectl
 }
@@ -354,7 +413,11 @@ func TestE2E(t *testing.T) {
 		t.Run("Backup", func(t *testing.T) {
 			t.Parallel()
 			ns, cleanup := NamespaceForTest(t, kubectl)
-			defer cleanup()
+			if *fCleanup {
+				defer cleanup()
+			} else {
+				t.Logf("Not performing namespace cleanup for %s because --cleanup=false", ns)
+			}
 			backupRestoreTests(t, kubectl.WithT(t).WithDefaultNamespace(ns))
 		})
 	})
@@ -457,7 +520,7 @@ func backupRestoreTests(t *testing.T, kubectl *kubectlContext) {
 
 	// At this point the cluster should be well-and-truly dead. So do the restore
 	t.Log("We restore the cluster")
-	err = kubectl.Apply("--filename", filepath.Join(*fRepoRoot, "config", "test", "e2e", "backup", "etcdcluster.yaml"))
+	err = kubectl.Apply("--filename", filepath.Join(*fRepoRoot, "config", "test", "e2e", "backup", "etcdrestore.yaml"))
 	require.NoError(t, err)
 
 	t.Log("And our data is still there")

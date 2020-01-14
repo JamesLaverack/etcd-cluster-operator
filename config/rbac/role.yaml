@@ -25,7 +25,26 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - persistantvolumeclaims/status
+  verbs:
+  - create
+  - get
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - persistentvolumeclaims
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
   verbs:
   - create
   - get
@@ -81,6 +100,7 @@ rules:
   resources:
   - etcdclusters
   verbs:
+  - create
   - get
   - list
   - watch

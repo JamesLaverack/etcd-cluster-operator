@@ -2,16 +2,18 @@ package controllers
 
 import (
 	"context"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	etcdv1alpha1 "github.com/improbable-eng/etcd-cluster-operator/api/v1alpha1"
 )
@@ -24,9 +26,10 @@ type EtcdRestoreReconciler struct {
 }
 
 // +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdrestores,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdclusters,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdrestores/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=core,resources=persistantvolumeclaims/status,verbs=get;update;patch;create
-// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;create
+// +kubebuilder:rbac:groups=core,resources=persistantvolumeclaims/status,verbs=get;watch;update;patch;create
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;watch;list;create
 
 func name(o metav1.Object) types.NamespacedName {
 	return types.NamespacedName{
@@ -43,6 +46,9 @@ const (
 )
 
 func markPVC(restore etcdv1alpha1.EtcdRestore, pvc *corev1.PersistentVolumeClaim) {
+	if pvc.Labels == nil {
+		pvc.Labels = make(map[string]string)
+	}
 	pvc.Labels[restoredFromLabel] = restore.Name
 }
 
@@ -51,6 +57,9 @@ func IsOurPVC(restore etcdv1alpha1.EtcdRestore, pvc corev1.PersistentVolumeClaim
 }
 
 func markPod(restore etcdv1alpha1.EtcdRestore, pod *corev1.Pod) {
+	if pod.Labels == nil {
+		pod.Labels = make(map[string]string)
+	}
 	pod.Labels[restoredFromLabel] = restore.Name
 	pod.Labels[restorePodLabel] = "true"
 }
@@ -61,6 +70,9 @@ func IsOurPod(restore etcdv1alpha1.EtcdRestore, pod corev1.Pod) bool {
 }
 
 func markCluster(restore etcdv1alpha1.EtcdRestore, cluster *etcdv1alpha1.EtcdCluster) {
+	if cluster.Labels == nil {
+		cluster.Labels = make(map[string]string)
+	}
 	cluster.Labels[restoredFromLabel] = restore.Name
 }
 
@@ -108,7 +120,9 @@ func (r *EtcdRestoreReconciler) podForRestore(restore etcdv1alpha1.EtcdRestore, 
 
 func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
-	_ = r.Log.WithValues("etcdrestore", req.NamespacedName)
+	log := r.Log.WithValues("etcdrestore", req.NamespacedName)
+
+	log.Info("Begin restore reconcile")
 
 	var restore etcdv1alpha1.EtcdRestore
 	if err := r.Get(ctx, req.NamespacedName, &restore); err != nil {
@@ -116,26 +130,31 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 		// references will clean everything up with a cascading delete.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	} else {
+		log.Info("Found restore object in Kubernetes, continuting")
 		// Found the resource, continue with reconciliation.
 	}
 
 	if restore.Status.Phase == etcdv1alpha1.EtcdRestorePhaseCompleted ||
 		restore.Status.Phase == etcdv1alpha1.EtcdRestorePhaseFailed {
 		// Do nothing here. We're already finished.
+		log.Info("Phase is set to an end state. Taking no further action", "phase", restore.Status.Phase)
 		return ctrl.Result{}, nil
 	} else {
 		// In any other state continue with the reconciliation. In particular we don't *read* the other possible states
 		// as once we know that we need to reconcile at all we will use the observed sate of the cluster and not our own
 		// status field.
+		log.Info("Phase is not set to an end state. Continuing reconciliation.", "phase", restore.Status.Phase)
 	}
 
 	// Simulate the cluster, peer, and PVC we'll create. We won't ever *create* any of these other than the PVC, but
 	// we need them to generate the PVC using the same code-path that the main operator does. Yes, in theory if you
 	// upgraded the operator part-way through a restore things could get super fun if the way of making these changed.
 	expectedCluster := clusterForRestore(restore)
+	expectedCluster.Default()
 	// We know that the cluster will be of size one for the restore. So only consider peer zero.
 	expectedPeerName := expectedPeerNamesForCluster(expectedCluster)[0]
 	expectedPeer := peerForCluster(expectedCluster, expectedPeerName)
+	expectedPeer.Default()
 	expectedPVC := pvcForPeer(expectedPeer)
 	// We want to avoid a risk of conflicting either with an existing cluster or another restore targeted at the same
 	// cluster name. So we'll mark the PVC's metadata to know that it is ours.
@@ -147,28 +166,33 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 
 	if apierrors.IsNotFound(err) {
 		// No PVC. Make it!
+		log.Info("Creating PVC.", "pvc-name", name(expectedPVC))
 		err := r.Create(ctx, expectedPVC)
 		return ctrl.Result{}, err
 	} else if err != nil {
 		// There was some other, non non-found error. Exit as we can't handle this case.
+		log.Info("Encountered error while finding PVC")
 		return ctrl.Result{}, err
 	} else {
+		log.Info("PVC already exists. continuing", "pvc-name", name(&pvc))
 		// The PVC is there already. Continue.
 	}
 
 	// Check to make sure we're expecting to restore into this PVC
 	if !IsOurPVC(restore, pvc) {
 		// It's unsafe to take any further action. We don't control the PVC.
+		log.Info("PVC is not marked as our PVC. Failing")
 		// TODO Report error reason
 		restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseFailed
 		err := r.Client.Status().Update(ctx, &restore)
 		return ctrl.Result{}, err
 	} else {
+		log.Info("PVC correctly marked as ours")
 		// Great, this PVC is marked as *our* restore (and not any random PVC, or one for an existing cluster, or
 		// a conflicting restore).
 	}
 
-	// Step 2: If the PVC is *not* already bound and we can't see a successful restore job, restore into it.
+/*	// Step 2: If the PVC is *not* already bound and we can't see a successful restore job, restore into it.
 	if pvc.Status.Phase == corev1.ClaimBound {
 		// PVC is already bound to something. This could be an already-running etcd Pod, or a restore Pod that's still
 		// running. So leave it alone and come back later. We assume that this is probably a restore Pod that we started
@@ -183,38 +207,52 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 		return ctrl.Result{}, err
 	} else if pvc.Status.Phase == corev1.ClaimPending {
 		// Okay, the PVC exists but is unbound. Continue.
-	}
+	}*/
 
 	// Check to see if our restore Pod already exists. It'll have the same name as the `EtcdRestore`.
 	restorePod := corev1.Pod{}
 	err = r.Get(ctx, name(&restore), &restorePod)
 	if apierrors.IsNotFound(err) {
+		toCreatePod := podForRestore(restore, pvc.Name, r.RestorePodImage)
+		log.Info("Launching restore pod", "pod-name", name(toCreatePod))
 		// No Pod. Launch it!
-		err := r.Create(ctx, podForRestore(restore, pvc.Name))
+		err := r.Create(ctx, toCreatePod)
 		return ctrl.Result{}, err
 	} else if err != nil {
+		log.Info("Error finding restore pod", "pod-name", name(&restore))
+		// TODO Report error reason
+		restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseFailed
+		err := r.Client.Status().Update(ctx, &restore)
 		return ctrl.Result{}, err
+	} else {
+		log.Info("Restore Pod already exists", "pod-name", name(&restorePod))
 	}
 
 	// Look for our labels if those aren't there this could be a pre-existing Pod and everything is bad.
 	if !IsOurPod(restore, restorePod) {
 		// TODO Report error reason
+		log.Info("Restore Pod isn't ours", "pod-name", name(&restorePod))
 		restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseFailed
 		err := r.Client.Status().Update(ctx, &restore)
 		return ctrl.Result{}, err
+	} else {
+		log.Info("Restore Pod confirmed to be ours", "pod-name", name(&restorePod))
 	}
 
 	phase := restorePod.Status.Phase
 	if phase == corev1.PodSucceeded {
 		// Success is what we want. Continue with reconciliation.
+		log.Info("Restore Pod has succeeded", "pod-name", name(&restorePod))
 	} else if phase == corev1.PodFailed || phase == corev1.PodUnknown {
 		// Pod has failed, so we fail
+		log.Info("Restore Pod was not successful, ending.", "pod-name", name(&restorePod), "phase", phase)
 		// TODO Report error reason
 		restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseFailed
 		err := r.Client.Status().Update(ctx, &restore)
 		return ctrl.Result{}, err
 	} else {
 		// This covers the "Pending" and "Running" phases. Do nothing and wait for the Pod to finish.
+		log.Info("Restore Pod still running.", "pod-name", name(&restorePod), "phase", phase)
 		return ctrl.Result{}, nil
 	}
 
@@ -224,31 +262,40 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 	err = r.Get(ctx, name(expectedCluster), &cluster)
 	if apierrors.IsNotFound(err) {
 		// No Cluster. Create it
+		log.Info("Creating new cluster", "cluster-name", name(expectedCluster))
 		err := r.Create(ctx, expectedCluster)
 		return ctrl.Result{}, err
 	} else if err != nil {
+		log.Info("Error creating cluster", "cluster-name", name(expectedCluster))
 		return ctrl.Result{}, err
+	} else {
+		log.Info("Cluster exists", "cluster-name", name(expectedCluster))
 	}
 
 	// If the cluster we just found isn't restored by us then fail completely
 	if !IsOurCluster(restore, &cluster) {
 		// TODO Report error reason
+		log.Info("Cluster not marked as ours", "cluster-name", name(expectedCluster))
 		restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseFailed
 		err := r.Client.Status().Update(ctx, &restore)
 		return ctrl.Result{}, err
+	} else {
+		log.Info("Cluster marked as ours", "cluster-name", name(expectedCluster))
 	}
 
 	// TODO Scale cluster to desired size. Need to check that the cluster is stable *before* triggering a scale. Then
 	// wait for it to stabilise again before calling it a good job and exiting successfully.
 
+	log.Info("Reached end of reconcile loop")
 	return ctrl.Result{}, nil
 }
 
-func podForRestore(restore etcdv1alpha1.EtcdRestore, pvcName string) *corev1.Pod {
+func podForRestore(restore etcdv1alpha1.EtcdRestore, pvcName string, restoreImage string) *corev1.Pod {
 	pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      restore.Name,
 			Namespace: restore.Namespace,
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&restore, etcdv1alpha1.GroupVersion.WithKind("EtcdRestore"))},
 		},
 		Spec: corev1.PodSpec{
 			Volumes: []corev1.Volume{
@@ -271,8 +318,7 @@ func podForRestore(restore etcdv1alpha1.EtcdRestore, pvcName string) *corev1.Pod
 			Containers: []corev1.Container{
 				{
 					Name: restoreContainerName,
-					// Use the same etcd image that we actually run etcd with.
-					Image: etcdRestoreImage,
+					Image: restoreImage,
 					Env: []corev1.EnvVar{
 						{
 							Name:  "RESTORE_ETCD_DATA_DIR",
@@ -344,8 +390,45 @@ func clusterForRestore(restore etcdv1alpha1.EtcdRestore) *etcdv1alpha1.EtcdClust
 	return cluster
 }
 
+type restoredFromMapper struct{}
+
+var _ handler.Mapper = &restoredFromMapper{}
+
+// Map looks up the peer name label from the PVC and generates a reconcile
+// request for *that* name in the namespace of the pvc.
+// This mapper ensures that we only wake up the Reconcile function for changes
+// to PVCs related to EtcdPeer resources.
+// PVCs are deliberately not owned by the peer, to ensure that they are not
+// garbage collected along with the peer.
+// So we can't use OwnerReference handler here.
+func (m *restoredFromMapper) Map(o handler.MapObject) []reconcile.Request {
+	requests := []reconcile.Request{}
+	labels := o.Meta.GetLabels()
+	if restoreName, found := labels[restoredFromLabel]; found {
+		requests = append(
+			requests,
+			reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      restoreName,
+					Namespace: o.Meta.GetNamespace(),
+				},
+			},
+		)
+	}
+	return requests
+}
+
 func (r *EtcdRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&etcdv1alpha1.EtcdRestore{}).
+		// Watch for changes to Pod resources that an EtcdRestore owns.
+		Owns(&corev1.Pod{}).
+		// Watch for changes to PVCs with a 'restored-from' label.
+		Watches(&source.Kind{Type: &corev1.PersistentVolumeClaim{}}, &handler.EnqueueRequestsFromMapFunc{
+			ToRequests: &restoredFromMapper{},
+		}).
+		Watches(&source.Kind{Type: &etcdv1alpha1.EtcdCluster{}}, &handler.EnqueueRequestsFromMapFunc{
+			ToRequests: &restoredFromMapper{},
+		}).
 		Complete(r)
 }
