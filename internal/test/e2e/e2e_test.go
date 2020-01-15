@@ -431,14 +431,12 @@ func backupRestoreTests(t *testing.T, kubectl *kubectlContext) {
 	clusterName := "e2e-backup-cluster"
 
 	t.Log("Containing data.")
-	out, err := eventuallyInCluster(
-		kubectl,
+	out, err := eventuallyInCluster(kubectl,
 		"set-etcd-value",
 		time.Minute*5,
-		"quay.io/coreos/etcd:v3.2.27",
-		"etcdctl", "--insecure-discovery", fmt.Sprintf("--discovery-srv=%s", clusterName),
-		"set", "--", "foo", "bar",
-	)
+		"quay.io/coreos/etcd:v3.3.17",
+		map[string]string{"ETCDCTL_API": "3"},
+		"etcdctl", "--insecure-discovery", fmt.Sprintf("--discovery-srv=%s", clusterName), "put", "foo", "bar")
 	require.NoError(t, err, out)
 
 	t.Log("A backup can be taken to a local disk.")
@@ -469,14 +467,12 @@ func backupRestoreTests(t *testing.T, kubectl *kubectlContext) {
 	// a resumption of the existing database by accident. So we'll set the 'foo' key to something else *after* we've
 	// taken our backup.
 	t.Log("And there are modifications made after the backup was taken")
-	_, err = eventuallyInCluster(
-		kubectl,
+	_, err = eventuallyInCluster(kubectl,
 		"set-etcd-value-after-backup",
 		time.Minute*2,
-		"quay.io/coreos/etcd:v3.2.27",
-		"etcdctl", "--insecure-discovery", fmt.Sprintf("--discovery-srv=%s", clusterName),
-		"set", "--", "foo", "key-changed-after-backup",
-	)
+		"quay.io/coreos/etcd:v3.3.17",
+		map[string]string{"ETCDCTL_API": "3"},
+		"etcdctl", "--insecure-discovery", fmt.Sprintf("--discovery-srv=%s", clusterName), "put", "foo", "key-changed-after-backup")
 	require.NoError(t, err, out)
 
 	t.Log("And the cluster is deleted")
@@ -525,16 +521,32 @@ func backupRestoreTests(t *testing.T, kubectl *kubectlContext) {
 	err = kubectl.Apply("--filename", filepath.Join(*fRepoRoot, "config", "test", "e2e", "backup", "etcdrestore.yaml"))
 	require.NoError(t, err)
 
+	// Wait for our cluster to appear
+	err = try.Eventually(func() error {
+		t.Log("")
+		members, err := kubectl.Get("etcdcluster", clusterName, "-o=jsonpath='{.status.members...name}'")
+		if err != nil {
+			return err
+		}
+		// Don't assert on exact members, just that we have one of them.
+		numMembers := len(strings.Split(members, " "))
+		if numMembers != 1 {
+			return errors.New(fmt.Sprintf("Expected etcd member list to have three members. Had %d.", numMembers))
+		}
+		return nil
+	}, time.Minute*2, time.Second*10)
+	require.NoError(t, err)
+
 	t.Log("And our data is still there")
-	out, err = eventuallyInCluster(
-		kubectl,
+	out, err = eventuallyInCluster(kubectl,
 		"get-etcd-value",
 		time.Minute*2,
-		"quay.io/coreos/etcd:v3.2.27",
-		"etcdctl", "--insecure-discovery", "--discovery-srv=cluster1",
-		"get", "--quorum")
+		"quay.io/coreos/etcd:v3.3.17",
+		map[string]string{"ETCDCTL_API": "3"},
+		"etcdctl", "--insecure-discovery", fmt.Sprintf("--discovery-srv=%s", clusterName), "get", "foo")
 	require.NoError(t, err, out)
-	assert.Equal(t, "bar\n", out)
+	// It'll output the key name, then a newline, then the value, then a newline.
+	assert.Equal(t, "foo\nbar\n", out)
 }
 
 func webhookTests(t *testing.T, kubectl *kubectlContext) {
@@ -705,14 +717,7 @@ func persistenceTests(t *testing.T, kubectl *kubectlContext) {
 	t.Log("Containing data.")
 	expectedValue := "foobarbaz"
 
-	out, err := eventuallyInCluster(
-		kubectl,
-		"set-etcd-value",
-		time.Minute*2,
-		"quay.io/coreos/etcd:v3.2.27",
-		"etcdctl", "--insecure-discovery", "--discovery-srv=cluster1",
-		"set", "--", "foo", expectedValue,
-	)
+	out, err := eventuallyInCluster(kubectl, "set-etcd-value", time.Minute*2, "quay.io/coreos/etcd:v3.2.27", nil, "etcdctl", "--insecure-discovery", "--discovery-srv=cluster1", "set", "--", "foo", expectedValue)
 	require.NoError(t, err, out)
 
 	t.Log("If the cluster is deleted.")
@@ -741,14 +746,7 @@ func persistenceTests(t *testing.T, kubectl *kubectlContext) {
 	require.NoError(t, err)
 
 	t.Log("And the data is still available.")
-	out, err = eventuallyInCluster(
-		kubectl,
-		"get-etcd-value",
-		time.Minute*2,
-		"quay.io/coreos/etcd:v3.2.27",
-		"etcdctl", "--insecure-discovery", "--discovery-srv=cluster1",
-		"get", "--quorum", "--", "foo",
-	)
+	out, err = eventuallyInCluster(kubectl, "get-etcd-value", time.Minute*2, "quay.io/coreos/etcd:v3.2.27", nil, "etcdctl", "--insecure-discovery", "--discovery-srv=cluster1", "get", "--quorum", "--", "foo")
 	require.NoError(t, err, out)
 	assert.Equal(t, expectedValue+"\n", out)
 }
@@ -782,14 +780,7 @@ func scaleDownTests(t *testing.T, kubectl *kubectlContext) {
 	t.Log("Which contains data")
 	const expectedValue = "foobarbaz"
 
-	out, err := eventuallyInCluster(
-		kubectl,
-		"set-etcd-value",
-		time.Minute*2,
-		"quay.io/coreos/etcd:v3.2.27",
-		"etcdctl", "--insecure-discovery", "--discovery-srv=my-cluster",
-		"set", "--", "foo", expectedValue,
-	)
+	out, err := eventuallyInCluster(kubectl, "set-etcd-value", time.Minute*2, "quay.io/coreos/etcd:v3.2.27", nil, "etcdctl", "--insecure-discovery", "--discovery-srv=my-cluster", "set", "--", "foo", expectedValue)
 	require.NoError(t, err, out)
 
 	t.Log("If the cluster is scaled down")
@@ -814,14 +805,7 @@ func scaleDownTests(t *testing.T, kubectl *kubectlContext) {
 	require.NoError(t, err)
 
 	t.Log("And the data is still available.")
-	out, err = eventuallyInCluster(
-		kubectl,
-		"get-etcd-value",
-		time.Minute*2,
-		"quay.io/coreos/etcd:v3.2.27",
-		"etcdctl", "--insecure-discovery", "--discovery-srv=my-cluster",
-		"get", "--quorum", "--", "foo",
-	)
+	out, err = eventuallyInCluster(kubectl, "get-etcd-value", time.Minute*2, "quay.io/coreos/etcd:v3.2.27", nil, "etcdctl", "--insecure-discovery", "--discovery-srv=my-cluster", "get", "--quorum", "--", "foo")
 	require.NoError(t, err, out)
 	assert.Equal(t, expectedValue+"\n", out)
 }

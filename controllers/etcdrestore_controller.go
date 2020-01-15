@@ -2,21 +2,22 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
+
 	"github.com/go-logr/logr"
+	etcdv1alpha1 "github.com/improbable-eng/etcd-cluster-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/pointer"
-	"path/filepath"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-
-	etcdv1alpha1 "github.com/improbable-eng/etcd-cluster-operator/api/v1alpha1"
 )
 
 // EtcdRestoreReconciler reconciles a EtcdRestore object
@@ -131,7 +132,7 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 		// references will clean everything up with a cascading delete.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	} else {
-		log.Info("Found restore object in Kubernetes, continuting")
+		log.Info("Found restore object in Kubernetes, continuing")
 		// Found the resource, continue with reconciliation.
 	}
 
@@ -337,11 +338,13 @@ func podForRestore(restore etcdv1alpha1.EtcdRestore,
 						},
 						{
 							Name:  "RESTORE_ETCD_INITIAL_CLUSTER",
-							Value: staticBootstrapInitialCluster(*peer.Spec.Bootstrap.Static),
+							Value: fmt.Sprintf("%s=http://localhost:2380", peer.Name),
+							// Value: staticBootstrapInitialCluster(*peer.Spec.Bootstrap.Static),
 						},
 						{
 							Name:  "RESTORE_ETCD_ADVERTISE_URL",
-							Value: advertiseURL(peer, etcdPeerPort).String(),
+							Value: "http://localhost:2380",
+							//Value: advertiseURL(peer, etcdPeerPort).String(),
 						},
 						{
 							Name: "RESTORE_ETCD_DATA_DIR",

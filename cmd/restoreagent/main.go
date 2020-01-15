@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/otiai10/copy"
 	"github.com/spf13/viper"
 	"go.etcd.io/etcd/clientv3/snapshot"
 	"gocloud.dev/blob"
@@ -21,6 +22,8 @@ func main() {
 	viper.SetEnvPrefix("restore")
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	viper.AutomaticEnv()
+
+	fmt.Printf("BEES\n")
 
 	etcdPeerName := viper.GetString("etcd-peer-name")
 	fmt.Printf("Using etcd peer name %s\n", etcdPeerName)
@@ -74,11 +77,13 @@ func main() {
 		panic(err)
 	}
 
+	restoreDir := filepath.Join(snapshotDir, "data-dir")
+
 	restoreConfig := snapshot.RestoreConfig{
 		SnapshotPath:        snapshotFilePath,
 		Name:                etcdPeerName,
-		OutputDataDir:       etcdDataDir,
-		OutputWALDir:        filepath.Join(etcdDataDir, "member", "wal"),
+		OutputDataDir:       restoreDir,
+		OutputWALDir:        filepath.Join(restoreDir, "member", "wal"),
 		PeerURLs:            []string{etcdAdvertiseURL},
 		InitialCluster:      etcdInitialCluster,
 		InitialClusterToken: etcdClusterName,
@@ -88,6 +93,11 @@ func main() {
 	client := snapshot.NewV3(nil)
 	fmt.Printf("Executing restore\n")
 	err = client.Restore(restoreConfig)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Copying restored data directory %s into correct PV on path %s\n", restoreDir, etcdDataDir)
+	err = copy.Copy(restoreDir, etcdDataDir)
 	if err != nil {
 		panic(err)
 	}

@@ -18,6 +18,7 @@ require (
 	github.com/go-logr/logr v0.1.0
 	github.com/google/go-cmp v0.3.0
 	github.com/google/gofuzz v1.0.0
+	github.com/otiai10/copy v1.0.2
 	github.com/robfig/cron/v3 v3.0.0
 	github.com/spf13/viper v1.3.2
 	github.com/stretchr/testify v1.4.0

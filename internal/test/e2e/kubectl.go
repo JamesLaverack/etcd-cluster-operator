@@ -229,7 +229,7 @@ func DeleteAllTestNamespaces(t *testing.T, kubectl *kubectlContext) {
 }
 
 // eventuallyInCluster runs a command as a Job in the current Kubernetes cluster namespace.
-func eventuallyInCluster(kubectl *kubectlContext, name string, deadline time.Duration, image string, command ...string) (string, error) {
+func eventuallyInCluster(kubectl *kubectlContext, name string, deadline time.Duration, image string, env map[string]string, command ...string) (string, error) {
 	job := &batchv1.Job{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Job",
@@ -252,6 +252,16 @@ func eventuallyInCluster(kubectl *kubectlContext, name string, deadline time.Dur
 				},
 			},
 		},
+	}
+
+	for k, v := range env {
+		job.Spec.Template.Spec.Containers[0].Env = append(
+			job.Spec.Template.Spec.Containers[0].Env,
+			corev1.EnvVar{
+				Name:  k,
+				Value: v,
+			},
+		)
 	}
 
 	f, err := ioutil.TempFile("", "e2e-job."+name+".json")

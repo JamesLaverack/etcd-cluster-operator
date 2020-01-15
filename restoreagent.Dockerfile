@@ -16,9 +16,9 @@ COPY internal/ internal/
 # Build
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o restoreagent cmd/restoreagent/main.go
 
-FROM gcr.io/distroless/static:nonroot as release
+FROM gcr.io/distroless/static as release
 WORKDIR /
 COPY --from=builder /workspace/restoreagent .
-USER nonroot:nonroot
+USER root:root
 
 ENTRYPOINT ["/restoreagent"]
