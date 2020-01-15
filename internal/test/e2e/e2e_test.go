@@ -547,6 +547,22 @@ func backupRestoreTests(t *testing.T, kubectl *kubectlContext) {
 	require.NoError(t, err, out)
 	// It'll output the key name, then a newline, then the value, then a newline.
 	assert.Equal(t, "foo\nbar\n", out)
+
+	// Wait for cluster to get scaled back up to all three members
+	err = try.Eventually(func() error {
+		t.Log("")
+		members, err := kubectl.Get("etcdcluster", clusterName, "-o=jsonpath='{.status.members...name}'")
+		if err != nil {
+			return err
+		}
+		// Don't assert on exact members, just that we have one of them.
+		numMembers := len(strings.Split(members, " "))
+		if numMembers != 3 {
+			return errors.New(fmt.Sprintf("Expected etcd member list to have three members. Had %d.", numMembers))
+		}
+		return nil
+	}, time.Minute*2, time.Second*10)
+	require.NoError(t, err)
 }
 
 func webhookTests(t *testing.T, kubectl *kubectlContext) {

@@ -28,7 +28,7 @@ type EtcdRestoreReconciler struct {
 }
 
 // +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdrestores,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdclusters,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdclusters,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdrestores/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=core,resources=persistantvolumeclaims/status,verbs=get;watch;update;patch;create
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;watch;list;create
@@ -288,8 +288,26 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 		log.Info("Cluster marked as ours", "cluster-name", name(expectedCluster))
 	}
 
-	// TODO Scale cluster to desired size. Need to check that the cluster is stable *before* triggering a scale. Then
-	// wait for it to stabilise again before calling it a good job and exiting successfully.
+	if cluster.Status.Replicas == *restore.Spec.ClusterTemplate.Spec.Replicas {
+		log.Info("Finished", "cluster-name", name(expectedCluster))
+		restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseCompleted
+		err := r.Client.Status().Update(ctx, &restore)
+		return ctrl.Result{}, err
+	}
+
+	if cluster.Status.Replicas == 0 {
+		// The cluster is the wrong size, but we haven't made the first peer yet. So a resize at this point will have
+		// incorrect behavour. Do nothing and wait.
+		return ctrl.Result{}, nil
+	}
+
+	// We know by this point that the cluster is up, it has at least one node, and it's the wrong size. So resize it.
+	resizedCluster := cluster.DeepCopy()
+	resizedCluster.Spec.Replicas = restore.Spec.ClusterTemplate.Spec.Replicas
+	err = r.Client.Patch(ctx, resizedCluster, client.MergeFrom(cluster.DeepCopyObject()))
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
 	log.Info("Reached end of reconcile loop")
 	return ctrl.Result{}, nil
