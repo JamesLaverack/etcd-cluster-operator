@@ -9,6 +9,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/pointer"
+	"path/filepath"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -155,6 +156,9 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 	expectedPeerName := expectedPeerNamesForCluster(expectedCluster)[0]
 	expectedPeer := peerForCluster(expectedCluster, expectedPeerName)
 	expectedPeer.Default()
+	// This sets the bootstrap configuration on the peer, which is used later on when we construct information to pass
+	// to the restore agent *about* the peer it will become.
+	configurePeerBootstrap(expectedPeer, expectedCluster)
 	expectedPVC := pvcForPeer(expectedPeer)
 	// We want to avoid a risk of conflicting either with an existing cluster or another restore targeted at the same
 	// cluster name. So we'll mark the PVC's metadata to know that it is ours.
@@ -192,28 +196,28 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 		// a conflicting restore).
 	}
 
-/*	// Step 2: If the PVC is *not* already bound and we can't see a successful restore job, restore into it.
-	if pvc.Status.Phase == corev1.ClaimBound {
-		// PVC is already bound to something. This could be an already-running etcd Pod, or a restore Pod that's still
-		// running. So leave it alone and come back later. We assume that this is probably a restore Pod that we started
-		// the last time, so don't do anything and we will re-reconcile when the Pod exists anyway.
-		return ctrl.Result{}, err
-	} else if pvc.Status.Phase == corev1.ClaimLost {
-		// Huh. If the claim is lost then the underlying PV is gone. This is beyond us, so just give up and let the user
-		// figure it out.
-		// TODO Report error reason
-		restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseFailed
-		err := r.Client.Status().Update(ctx, &restore)
-		return ctrl.Result{}, err
-	} else if pvc.Status.Phase == corev1.ClaimPending {
-		// Okay, the PVC exists but is unbound. Continue.
-	}*/
+	/*	// Step 2: If the PVC is *not* already bound and we can't see a successful restore job, restore into it.
+		if pvc.Status.Phase == corev1.ClaimBound {
+			// PVC is already bound to something. This could be an already-running etcd Pod, or a restore Pod that's still
+			// running. So leave it alone and come back later. We assume that this is probably a restore Pod that we started
+			// the last time, so don't do anything and we will re-reconcile when the Pod exists anyway.
+			return ctrl.Result{}, err
+		} else if pvc.Status.Phase == corev1.ClaimLost {
+			// Huh. If the claim is lost then the underlying PV is gone. This is beyond us, so just give up and let the user
+			// figure it out.
+			// TODO Report error reason
+			restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseFailed
+			err := r.Client.Status().Update(ctx, &restore)
+			return ctrl.Result{}, err
+		} else if pvc.Status.Phase == corev1.ClaimPending {
+			// Okay, the PVC exists but is unbound. Continue.
+		}*/
 
 	// Check to see if our restore Pod already exists. It'll have the same name as the `EtcdRestore`.
 	restorePod := corev1.Pod{}
 	err = r.Get(ctx, name(&restore), &restorePod)
 	if apierrors.IsNotFound(err) {
-		toCreatePod := podForRestore(restore, pvc.Name, r.RestorePodImage)
+		toCreatePod := podForRestore(restore, *expectedPeer, pvc.Name, r.RestorePodImage)
 		log.Info("Launching restore pod", "pod-name", name(toCreatePod))
 		// No Pod. Launch it!
 		err := r.Create(ctx, toCreatePod)
@@ -290,11 +294,14 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 	return ctrl.Result{}, nil
 }
 
-func podForRestore(restore etcdv1alpha1.EtcdRestore, pvcName string, restoreImage string) *corev1.Pod {
+func podForRestore(restore etcdv1alpha1.EtcdRestore,
+	peer etcdv1alpha1.EtcdPeer,
+	pvcName string,
+	restoreImage string) *corev1.Pod {
 	pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      restore.Name,
-			Namespace: restore.Namespace,
+			Name:            restore.Name,
+			Namespace:       restore.Namespace,
 			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&restore, etcdv1alpha1.GroupVersion.WithKind("EtcdRestore"))},
 		},
 		Spec: corev1.PodSpec{
@@ -317,28 +324,46 @@ func podForRestore(restore etcdv1alpha1.EtcdRestore, pvcName string, restoreImag
 			},
 			Containers: []corev1.Container{
 				{
-					Name: restoreContainerName,
+					Name:  restoreContainerName,
 					Image: restoreImage,
 					Env: []corev1.EnvVar{
 						{
-							Name:  "RESTORE_ETCD_DATA_DIR",
-							Value: "/var/lib/etcd",
+							Name:  "RESTORE_ETCD_PEER_NAME",
+							Value: peer.Name,
 						},
 						{
-							Name:  "RESTORE_SNAPSHOT_DIR",
-							Value: "/var/snapshot",
+							Name:  "RESTORE_ETCD_CLUSTER_NAME",
+							Value: restore.ClusterName,
+						},
+						{
+							Name:  "RESTORE_ETCD_INITIAL_CLUSTER",
+							Value: staticBootstrapInitialCluster(*peer.Spec.Bootstrap.Static),
+						},
+						{
+							Name:  "RESTORE_ETCD_ADVERTISE_URL",
+							Value: advertiseURL(peer, etcdPeerPort).String(),
+						},
+						{
+							Name: "RESTORE_ETCD_DATA_DIR",
+							// Must match the data dir we use in the peer's pods
+							Value: etcdDataMountPath,
+						},
+						{
+							Name: "RESTORE_SNAPSHOT_DIR",
+							// doesn't matter, must be some scratch storage though. We assume it's empty.
+							Value: "/tmp/snapshot",
 						},
 					},
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      "etcd-data",
 							ReadOnly:  false,
-							MountPath: "/var/lib/etcd",
+							MountPath: etcdDataMountPath,
 						},
 						{
 							Name:      "snapshot",
 							ReadOnly:  false,
-							MountPath: "/var/snapshot",
+							MountPath: "/tmp/snapshot",
 						},
 					},
 				},
@@ -354,21 +379,48 @@ func podForRestore(restore etcdv1alpha1.EtcdRestore, pvcName string, restoreImag
 		pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, ev)
 	}
 
-	if restore.Spec.Source.GCSBucket != nil {
-		// GCS restore
-		addEnvVar(corev1.EnvVar{
-			Name:  "RESTORE_TYPE",
-			Value: "GCS"})
-		addEnvVar(corev1.EnvVar{
-			Name:  "RESTORE_GCS_BUCKET_NAME",
-			Value: restore.Spec.Source.GCSBucket.BucketName})
-		addEnvVar(corev1.EnvVar{
-			Name:  "RESTORE_GCS_OBJECT_PATH",
-			Value: restore.Spec.Source.GCSBucket.ObjectPath})
-		addEnvVar(corev1.EnvVar{
-			Name: "RESTORE_GCS_SECRET_KEY",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: restore.Spec.Source.GCSBucket.Credentials.SecretKeyRef}})
+	addEnvVar(corev1.EnvVar{
+		Name:  "RESTORE_BUCKET_URL",
+		Value: restore.Spec.Source.Bucket.BucketURL})
+	addEnvVar(corev1.EnvVar{
+		Name:  "RESTORE_OBJECT_PATH",
+		Value: restore.Spec.Source.Bucket.ObjectPath})
+	if creds := restore.Spec.Source.Bucket.Credentials; creds != nil {
+		if creds.GoogleCloud != nil {
+			// Mount the credentials and provide the `GOOGLE_APPLICATION_CREDENTIALS` environment variable to the
+			// mounted path. See https://cloud.google.com/docs/authentication/production#obtaining_and_providing_service_account_credentials_manually
+			const volumeName = "google-cloud-credentials"
+			const mountPath = "/var/credentials/google-cloud"
+			// use a constant file name. With the mount path that means that the credentials will be available in the
+			// pod at /var/credentials/google-cloud/credentials.json
+			const fileName = "credentials.json"
+			pod.Spec.Volumes = append(pod.Spec.Volumes,
+				corev1.Volume{
+					Name: volumeName,
+					VolumeSource: corev1.VolumeSource{
+						Secret: &corev1.SecretVolumeSource{
+							SecretName: creds.GoogleCloud.SecretKeyRef.Name,
+							Items: []corev1.KeyToPath{
+								{
+									Key:  creds.GoogleCloud.SecretKeyRef.Key,
+									Path: fileName,
+								},
+							},
+						},
+					},
+				})
+			pod.Spec.Containers[0].VolumeMounts = append(
+				pod.Spec.Containers[0].VolumeMounts,
+				corev1.VolumeMount{
+					Name:      volumeName,
+					ReadOnly:  true,
+					MountPath: mountPath,
+				})
+
+			addEnvVar(corev1.EnvVar{
+				Name:  "GOOGLE_APPLICATION_CREDENTIALS",
+				Value: filepath.Join(mountPath, fileName)})
+		}
 	}
 
 	markPod(restore, &pod)

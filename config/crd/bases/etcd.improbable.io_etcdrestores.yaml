@@ -214,12 +214,15 @@ spec:
             source:
               description: Source describes the location the backup is pulled from
               properties:
-                gcsBucket:
-                  description: GCSBucket identifies a Google Cloud Storage bucket
-                    to pull the snapshot from
+                bucket:
+                  description: Bucket identifies a generic blob Storage bucket to
+                    pull the snapshot from.
                   properties:
-                    bucketName:
-                      description: BucketName is the name of the storage bucket.
+                    bucketUrl:
+                      description: BucketURL is the name of the storage bucket. This
+                        is a go-cloud bucket URL https://gocloud.dev/howto/blob/ and
+                        should use a URL scheme of the bucket provider. For example
+                        `s3://my-amazon-bucket` or `gcs://my-google-cloud-bucket`.
                       maxLength: 222
                       minLength: 3
                       type: string
@@ -228,24 +231,29 @@ spec:
                         that will be provided to the Google Cloud APIs in order to
                         write backup data.
                       properties:
-                        secretKeySelector:
-                          description: Credentials are taken from the key of a Kubernetes
-                            secret.
+                        googleCloud:
+                          description: Provide credentials for Google Cloud Platform.
                           properties:
-                            key:
-                              description: The key of the secret to select from.  Must
-                                be a valid secret key.
-                              type: string
-                            name:
-                              description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                TODO: Add other useful fields. apiVersion, kind, uid?'
-                              type: string
-                            optional:
-                              description: Specify whether the Secret or its key must
-                                be defined
-                              type: boolean
-                          required:
-                          - key
+                            secretKeySelector:
+                              description: Credentials are taken from the key of a
+                                Kubernetes secret.
+                              properties:
+                                key:
+                                  description: The key of the secret to select from.  Must
+                                    be a valid secret key.
+                                  type: string
+                                name:
+                                  description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                    TODO: Add other useful fields. apiVersion, kind,
+                                    uid?'
+                                  type: string
+                                optional:
+                                  description: Specify whether the Secret or its key
+                                    must be defined
+                                  type: boolean
+                              required:
+                              - key
+                              type: object
                           type: object
                       type: object
                     objectPath:
@@ -254,16 +262,11 @@ spec:
                       minLength: 1
                       type: string
                   required:
-                  - bucketName
+                  - bucketUrl
                   - objectPath
                   type: object
-                local:
-                  properties:
-                    directory:
-                      type: string
-                  required:
-                  - directory
-                  type: object
+              required:
+              - bucket
               type: object
           required:
           - clusterTemplate

@@ -4,8 +4,15 @@ metadata:
   name: e2e-restore
 spec:
   source:
-    local:
-      directory: /tmp/backups
+    bucket:
+      bucketUrl: gs://etcd-backup-test
+      objectPath: foo.db
+      credentials:
+        googleCloud:
+          secretKeySelector:
+            name: backup-gcs-cred
+            key: gcp.json
+            optional: false
   clusterTemplate:
     clusterName: e2e-backup-cluster
     spec:

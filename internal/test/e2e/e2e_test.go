@@ -382,34 +382,34 @@ func TestE2E(t *testing.T) {
 	// t.Parallel is used in its test function.
 	// See https://github.com/golang/go/issues/17791#issuecomment-258527390
 	t.Run("Parallel", func(t *testing.T) {
-/*		t.Run("SampleCluster", func(t *testing.T) {
-			t.Parallel()
-			kubectl := kubectl.WithT(t)
-			ns, cleanup := NamespaceForTest(t, kubectl)
-			defer cleanup()
-			sampleClusterTests(t, kubectl.WithDefaultNamespace(ns), sampleClusterPath)
-		})
-		t.Run("Webhooks", func(t *testing.T) {
-			t.Parallel()
-			kubectl := kubectl.WithT(t)
-			ns, cleanup := NamespaceForTest(t, kubectl)
-			defer cleanup()
-			webhookTests(t, kubectl.WithDefaultNamespace(ns))
-		})
-		t.Run("Persistence", func(t *testing.T) {
-			t.Parallel()
-			kubectl := kubectl.WithT(t)
-			ns, cleanup := NamespaceForTest(t, kubectl)
-			defer cleanup()
-			persistenceTests(t, kubectl.WithDefaultNamespace(ns))
-		})
-		t.Run("ScaleDown", func(t *testing.T) {
-			t.Parallel()
-			kubectl := kubectl.WithT(t)
-			ns, cleanup := NamespaceForTest(t, kubectl)
-			defer cleanup()
-			scaleDownTests(t, kubectl.WithDefaultNamespace(ns))
-		})*/
+		/*		t.Run("SampleCluster", func(t *testing.T) {
+					t.Parallel()
+					kubectl := kubectl.WithT(t)
+					ns, cleanup := NamespaceForTest(t, kubectl)
+					defer cleanup()
+					sampleClusterTests(t, kubectl.WithDefaultNamespace(ns), sampleClusterPath)
+				})
+				t.Run("Webhooks", func(t *testing.T) {
+					t.Parallel()
+					kubectl := kubectl.WithT(t)
+					ns, cleanup := NamespaceForTest(t, kubectl)
+					defer cleanup()
+					webhookTests(t, kubectl.WithDefaultNamespace(ns))
+				})
+				t.Run("Persistence", func(t *testing.T) {
+					t.Parallel()
+					kubectl := kubectl.WithT(t)
+					ns, cleanup := NamespaceForTest(t, kubectl)
+					defer cleanup()
+					persistenceTests(t, kubectl.WithDefaultNamespace(ns))
+				})
+				t.Run("ScaleDown", func(t *testing.T) {
+					t.Parallel()
+					kubectl := kubectl.WithT(t)
+					ns, cleanup := NamespaceForTest(t, kubectl)
+					defer cleanup()
+					scaleDownTests(t, kubectl.WithDefaultNamespace(ns))
+				})*/
 		t.Run("Backup", func(t *testing.T) {
 			t.Parallel()
 			ns, cleanup := NamespaceForTest(t, kubectl)
@@ -520,6 +520,8 @@ func backupRestoreTests(t *testing.T, kubectl *kubectlContext) {
 
 	// At this point the cluster should be well-and-truly dead. So do the restore
 	t.Log("We restore the cluster")
+	_, err = kubectl.Create("secret", "generic", "backup-gcs-cred", fmt.Sprintf("--from-file=%s", filepath.Join(*fRepoRoot, "config", "test", "e2e", "backup", "gcp.json")))
+	require.NoError(t, err)
 	err = kubectl.Apply("--filename", filepath.Join(*fRepoRoot, "config", "test", "e2e", "backup", "etcdrestore.yaml"))
 	require.NoError(t, err)
 

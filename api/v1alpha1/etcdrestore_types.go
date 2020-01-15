@@ -9,23 +9,21 @@ import (
 
 type EtcdRestoreSource struct {
 
-	// +optional
-	Local *EtcdRestoreSourceLocal `json:"local,omitempty"`
+	// Note: This structure requires that you provide a `bucket`. But is designed such that you could modify this struct
+	//       in the future to add a new way to get the snapshot data. This would require a code change but would not
+	//       require a change in existing YAML files that use the current `restore.spec.source.bucket` path.
 
-	// GCSBucket identifies a Google Cloud Storage bucket to pull the snapshot from
-	// +optional
-	GCSBucket *EtcdRestoreSourceGCSBucket `json:"gcsBucket,omitempty"`
+	// Bucket identifies a generic blob Storage bucket to pull the snapshot from.
+	Bucket EtcdRestoreSourceBucket `json:"bucket"`
 }
 
-type EtcdRestoreSourceLocal struct {
-	Directory string `json:"directory"`
-}
-
-type EtcdRestoreSourceGCSBucket struct {
-	// BucketName is the name of the storage bucket.
+type EtcdRestoreSourceBucket struct {
+	// BucketURL is the name of the storage bucket. This is a go-cloud bucket URL https://gocloud.dev/howto/blob/ and
+	// should use a URL scheme of the bucket provider. For example `s3://my-amazon-bucket` or
+	// `gcs://my-google-cloud-bucket`.
 	// +kubebuilder:validation:MinLength=3
 	// +kubebuilder:validation:MaxLength=222
-	BucketName string `json:"bucketName"`
+	BucketURL string `json:"bucketUrl"`
 
 	// ObjectPath is the path to the object inside the bucket.
 	// +kubebuilder:validation:MinLength=1
@@ -34,7 +32,7 @@ type EtcdRestoreSourceGCSBucket struct {
 	// Credentials holds the method of obtaining credentials that will be provided to the
 	// Google Cloud APIs in order to write backup data.
 	// +optional
-	Credentials *GoogleCloudCredentials `json:"credentials,omitempty"`
+	Credentials *BucketCredentials `json:"credentials,omitempty"`
 }
 
 // A template to define the cluster we'll make. The namespace will be the same as this restore resource.
