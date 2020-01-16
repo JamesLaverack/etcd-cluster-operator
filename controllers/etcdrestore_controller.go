@@ -184,13 +184,13 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 		// Check to make sure we're expecting to restore into this PVC
 		if !IsOurPVC(restore, pvc) {
 			// It's unsafe to take any further action. We don't control the PVC.
-			log.Info("PVC is not marked as our PVC. Failing")
+			log.Info("PVC is not marked as our PVC. Failing", "pvc-name", name(&pvc))
 			// TODO Report error reason
 			restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseFailed
 			err := r.Client.Status().Update(ctx, &restore)
 			return ctrl.Result{}, err
 		} else {
-			log.Info("PVC correctly marked as ours")
+			log.Info("PVC correctly marked as ours", "pvc-name", name(&pvc))
 			// Great, this PVC is marked as *our* restore (and not any random PVC, or one for an existing cluster, or
 			// a conflicting restore).
 		}
@@ -199,16 +199,22 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 	// So the peer restore is like a distributed fork/join. We need to launch n restore pods, where n is the number of
 	// PVCs. Then wait for all of them to be complete. If any fail we abort.
 
+	log.Info("Searching for restore pods")
 	restorePods := make([]*corev1.Pod, len(expectedPeerNames))
 	// Go find the restore pods for each peer
 	for i, peer := range expectedPeers {
-		err := r.Get(ctx, restorePodNamespacedName(peer), restorePods[i])
+		log.Info("Searching for restore pod for peer", "peer-name", peer.Name)
+		pod := corev1.Pod{}
+		err := r.Get(ctx, restorePodNamespacedName(peer), &pod)
 		if client.IgnoreNotFound(err) != nil {
 			// This was a non-notfound error. Fail!
 			return ctrl.Result{}, err
+		} else if err == nil {
+			restorePods[i] = &pod
 		}
 	}
 
+	log.Info("Finished querying for restore pods")
 	// Verify each pod we found is actually ours
 	for _, restorePod := range restorePods {
 		if restorePod != nil && !IsOurPod(restore, *restorePod) {
@@ -220,10 +226,12 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 		}
 	}
 
+	log.Info("Verified all existing restore pods are ours")
 	// Launch any that are not found
 	for i, restorePod := range restorePods {
 		if restorePod == nil {
 			// We couldn't find this restore pod. Create it.
+			log.Info("Defining restore pod", "pod-index", i)
 			toCreatePod := podForRestore(restore, expectedPeers[i], expectedPVCs[i].Name, r.RestorePodImage)
 			log.Info("Launching restore pod", "pod-name", name(toCreatePod))
 			// No Pod. Launch it! We then exit. Next time we'll make the next one.
@@ -231,7 +239,7 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 			return ctrl.Result{}, err
 		}
 	}
-
+	log.Info("All restore pods are launched")
 	// All restore pods exist and our ours, so have they finished? This would be the join part of the "funky fork/join".
 	anyFailed := false
 	allSuccess := true
@@ -242,7 +250,7 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 			log.Info("Restore Pod has succeeded", "pod-name", name(restorePod))
 		} else if phase == corev1.PodFailed || phase == corev1.PodUnknown {
 			// Pod has failed, so we fail
-			log.Info("Restore Pod was not successful, ending.", "pod-name", name(restorePod), "phase", phase)
+			log.Info("Restore Pod was not successful", "pod-name", name(restorePod), "phase", phase)
 			allSuccess = false
 			anyFailed = true
 		} else {
@@ -254,16 +262,20 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 
 	if anyFailed {
 		// TODO Report error reason
+		log.Info("One or more restore pods were not successful. Marking the restore as failed.")
 		restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseFailed
+		log.Info("Restore is now", "restore", fmt.Sprintf("%v", restore))
 		err := r.Client.Status().Update(ctx, &restore)
 		return ctrl.Result{}, err
 	}
 	if !allSuccess {
+		log.Info("One or more restore pods are still executing, and none have failed. Waiting...")
 		// Hrm. Not all finished yet. Exit and do nothing.
 		return ctrl.Result{}, nil
 	}
 
 	// Create the cluster
+	log.Info("All restore pods are complete, creating etcd cluster")
 	cluster := etcdv1alpha1.EtcdCluster{}
 	err := r.Get(ctx, name(expectedCluster), &cluster)
 	if apierrors.IsNotFound(err) {
@@ -277,6 +289,7 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 	}
 
 	// This is the end. Our cluster exists.
+	log.Info("Verified cluster exists, exiting.")
 	restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseCompleted
 	err = r.Client.Status().Update(ctx, &restore)
 	return ctrl.Result{}, err
