@@ -59,11 +59,9 @@ type EtcdRestoreSpec struct {
 type EtcdRestorePhase string
 
 var (
-	EtcdRestorePhaseCreatingPVCs      EtcdRestorePhase = "CreatingPVCs"
-	EtcdRestorePhaseUnpackingSnapshot EtcdRestorePhase = "UnpackingSnapshot"
-	EtcdRestorePhaseCreatingCluster   EtcdRestorePhase = "CreatingCluster"
-	EtcdRestorePhaseFailed            EtcdRestorePhase = "Failed"
-	EtcdRestorePhaseCompleted         EtcdRestorePhase = "Completed"
+	EtcdRestorePhasePending   EtcdRestorePhase = "Pending"
+	EtcdRestorePhaseFailed    EtcdRestorePhase = "Failed"
+	EtcdRestorePhaseCompleted EtcdRestorePhase = "Completed"
 )
 
 // EtcdRestoreStatus defines the observed state of EtcdRestore
@@ -77,6 +75,7 @@ type EtcdRestoreStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
 
 // EtcdRestore is the Schema for the etcdrestores API
 type EtcdRestore struct {

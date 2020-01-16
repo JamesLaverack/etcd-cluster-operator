@@ -136,11 +136,16 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 		// Do nothing here. We're already finished.
 		log.Info("Phase is set to an end state. Taking no further action", "phase", restore.Status.Phase)
 		return ctrl.Result{}, nil
-	} else {
+	} else if restore.Status.Phase == etcdv1alpha1.EtcdRestorePhasePending {
 		// In any other state continue with the reconciliation. In particular we don't *read* the other possible states
 		// as once we know that we need to reconcile at all we will use the observed sate of the cluster and not our own
 		// status field.
 		log.Info("Phase is not set to an end state. Continuing reconciliation.", "phase", restore.Status.Phase)
+	} else {
+		log.Info("Restore has no phase, setting to pending")
+		restore.Status.Phase = etcdv1alpha1.EtcdRestorePhasePending
+		err := r.Client.Status().Update(ctx, &restore)
+		return ctrl.Result{}, err
 	}
 
 	// Simulate the cluster, peer, and PVC we'll create. We won't ever *create* any of these other than the PVC, but
@@ -264,7 +269,6 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 		// TODO Report error reason
 		log.Info("One or more restore pods were not successful. Marking the restore as failed.")
 		restore.Status.Phase = etcdv1alpha1.EtcdRestorePhaseFailed
-		log.Info("Restore is now", "restore", fmt.Sprintf("%v", restore))
 		err := r.Client.Status().Update(ctx, &restore)
 		return ctrl.Result{}, err
 	}
