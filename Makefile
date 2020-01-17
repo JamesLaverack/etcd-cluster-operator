@@ -1,6 +1,7 @@
 VERSION ?= $(shell git describe --tags)
 # Image URL to use all building/pushing image targets
 IMG ?= "controller:$(VERSION)"
+RESTORE_AGENT_IMG ?= "restore-agent:$(VERSION)"
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 CRD_OPTIONS ?= "crd:trivialVersions=true"
 
@@ -112,6 +113,9 @@ go-get-patch:
 verify-go-get-patch:
 	./hack/verify.sh make -s go-get-patch
 
+docker-restoreagent-build: test
+	docker build . --file restoreagent.Dockerfile -t ${RESTORE_AGENT_IMG}
+
 # Build the docker image. This should be used for release versions, and builds the image on top of distroless.
 docker-build:
 	docker build . --target release --build-arg VERSION=$(VERSION) -t ${IMG}
@@ -123,6 +127,9 @@ docker-build-debug:
 # Push the docker image
 docker-push:
 	docker push ${IMG}
+
+docker-restoreagent-push:
+	docker push ${RESTORE_AGENT_IMG}
 
 # find or download controller-gen
 # download controller-gen if necessary

@@ -36,6 +36,7 @@ func main() {
 	var metricsAddr, backupTempDir string
 	var enableLeaderElection bool
 	var printVersion bool
+	var restoreImageName string
 
 	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
@@ -43,6 +44,7 @@ func main() {
 	flag.StringVar(&backupTempDir, "backup-tmp-dir", os.TempDir(), "The directory to temporarily place backups before they are uploaded to their destination.")
 	flag.BoolVar(&printVersion, "version", false,
 		"Print version to stdout and exit")
+	flag.StringVar(&restoreImageName, "restore-image-name", "", "The Docker image to use to perform a restore")
 	flag.Parse()
 
 	if printVersion {
@@ -97,6 +99,15 @@ func main() {
 		Schedules:   controllers.NewScheduleMap(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EtcdBackupSchedule")
+		os.Exit(1)
+	}
+	if err = (&controllers.EtcdRestoreReconciler{
+		Client:          mgr.GetClient(),
+		Log:             ctrl.Log.WithName("controllers").WithName("EtcdRestore"),
+		Recorder:        mgr.GetEventRecorderFor("etcdrestore-reconciler"),
+		RestorePodImage: restoreImageName,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "EtcdRestore")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

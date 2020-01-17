@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"gocloud.dev/blob"
+	"io/ioutil"
 	"log"
 	"net"
 
@@ -13,6 +16,40 @@ import (
 
 type proxyServer struct {
 	pb.UnimplementedProxyServer
+	BucketURL string
+}
+
+// Both pb.DownloadRequest and pb.UploadRequest satisfy this interface.
+type backupReference interface {
+	GetClusterIdentifier() string
+	GetBackupIdentifier() string
+}
+
+// Translate a reference to a backup into an expected object name.
+func (ps *proxyServer) objectPathForBackup(ref backupReference) string {
+	return fmt.Sprintf("%s/%s", ref.GetClusterIdentifier(), ref.GetBackupIdentifier())
+}
+
+func (ps *proxyServer) Download(ctx context.Context, req *pb.DownloadRequest) (*pb.DownloadReply, error) {
+	bucket, err := blob.OpenBucket(ctx, ps.BucketURL)
+	if err != nil {
+		return nil, err
+	}
+
+	objectPath := ps.objectPathForBackup(req)
+	blobReader, err := bucket.NewReader(ctx, objectPath, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Here we read the entire contents of the backup into memory. In theory these could be quite big (multiple
+	// gigabytes). So we're actually taking a risk that the backup could be *too big* for our available memory.
+	backup, err := ioutil.ReadAll(blobReader)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pb.DownloadReply{Backup: backup}, nil
 }
 
 func main() {
