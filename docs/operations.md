@@ -238,6 +238,94 @@ you must first remove the `PersistentVolumeClaim` associated with any `EtcdPeer`
 operations. Otherwise new `EtcdPeer` and `Pods` will be started with `/var/lib/etcd` data corresponding to an old etcd
 member ID, and the node will fail to join the cluster.
 
+## Create a Backup
+
+A running cluster can be backed up by creating a `EtcdBackup` resource. The operator will attempt to perform a backup as
+soon as possible once the resource is created, but no particular guarantee of timeliness is given. The cluster does not
+need to be paused or shutdown during this operation.
+
+An example of a backup resource is below:
+
+```yaml
+apiVersion: etcd.improbable.io/v1alpha1
+kind: EtcdBackup
+metadata:
+  name: my-cluster-backup
+  namespace: default
+spec:
+  clusterEndpoints: 
+  - scheme: http
+    host: my-cluster.default.svc
+    port: 2379
+  type: snapshot
+  destination:
+    gcsBucket:
+      bucketName: my-cluster-backup-bucket
+      creds:
+        secretRef: 
+          name: my-cluster-backup-bucket-credentials
+          namespace: default
+```
+
+The `spec.clusterEndpoints` array must be given the full domain name of at least one of the cluster's endpoints. There
+is no requirement that the target cluster must be managed by the operator, so long as the operator pod can connect to
+it.
+
+The `spec.destination` field defines the location in which the backup will be stroed, and any credentials used to
+authenticate against that storage location.
+
+## Restore from a Backup
+
+A restore is represented by an `EtcdRestore` resource. To restore from a backup, a new cluster must be created. It is
+not possible to restore a backup into an existing, already running cluster. An existing cluster should be deleted,
+including the Persistent Volume Claims, before restoring a new one with the same name.
+
+An example of a restore resource is below:
+
+```yaml
+apiVersion: etcd.improbable.io/v1alpha1
+kind: EtcdRestore
+metadata:
+  name: e2e-restore
+spec:
+  source:
+    bucket:
+      bucketUrl: gs://etcd-backup-test
+      objectPath: foo.db
+      credentials:
+        googleCloud:
+          secretKeySelector:
+            name: backup-gcs-cred
+            key: gcp.json
+            optional: false
+  clusterTemplate:
+    clusterName: e2e-backup-cluster
+    spec:
+      replicas: 3
+      storage:
+        volumeClaimTemplate:
+          storageClassName: standard
+          resources:
+            requests:
+              storage: 100Mi
+```
+
+The `spec.source` field is used to define the source of the backup `.db` file. Currently the only supported option is
+`bucket` which can pull a restore file from Google Cloud Storage, Amazon S3, or Azure Blob Storage. The `bucketURL`
+field should have a scheme to indicate which source is being used.
+
+| Storage Type         | Bucket URL Scheme |
+| -------------------- | ----------------- |
+| Google Cloud Storage | `gs://`           |
+| Amazon S3            | `s3://`           |
+| Azure Blob Storage   | `azblob://`       |
+
+The `objectPath` should be the path to the backup file object inside the bucket. The `credentials` field can be used to
+provide credentials (via a Secret) to access the storage bucket in question, in a provider specific manner.
+
+The `spec.clusterTemplate` field describes the `spec` of the cluster we will create, and supports exactly the same
+options as the `spec` field on a `EtcdCluster` resource.
+
 ## Frequently Asked Questions
 
 ### Why aren't there Liveness Probes for the Etcd Pods?
