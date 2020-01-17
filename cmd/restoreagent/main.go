@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,6 +89,32 @@ func main() {
 		InitialCluster:      etcdInitialCluster,
 		InitialClusterToken: etcdClusterName,
 		SkipHashCheck:       false,
+	}
+
+	// We've got a problematic Catch-22 here. We need to set the peer advertise URL to be the real URL that the eventual
+	// peer will use, and we need to set the initial cluster list to contain all the peer advertise URLs for the future
+	// cluster. We know those ahead of time (and the restore controller has provided them in environment variables).
+	// However without the Kubernetes service to provide DNS and the Hostnames set on the pods they can't actually be
+	// resolved. Unfortunately, the etcd API will try to resolve the advertise URL to check it's real.
+	// So, we need to fake it. I'm not looking for judgement.
+	u, err := url.Parse(etcdAdvertiseURL)
+	if err != nil {
+		panic(err)
+	}
+	uParts := strings.Split(u.Host, ":")
+	f, err := os.OpenFile("/etc/hosts",
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		panic(err)
+	}
+	hostsFileEntry := fmt.Sprintf("127.0.0.1 %s", uParts[0])
+	fmt.Printf("Appending '%s' to hosts file\n", hostsFileEntry)
+	if _, err := f.WriteString(hostsFileEntry); err != nil {
+		panic(err)
+	}
+	err = f.Close()
+	if err != nil {
+		panic(err)
 	}
 
 	client := snapshot.NewV3(nil)
