@@ -3,7 +3,9 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-logr/logr"
 	etcdv1alpha1 "github.com/improbable-eng/etcd-cluster-operator/api/v1alpha1"
@@ -26,7 +28,7 @@ type EtcdRestoreReconciler struct {
 	RestorePodImage string
 }
 
-// +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdrestores,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdrestores,verbs=get;list;watch
 // +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdclusters,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdrestores/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=core,resources=persistantvolumeclaims/status,verbs=get;watch;update;patch;create
@@ -41,7 +43,6 @@ func name(o metav1.Object) types.NamespacedName {
 
 const (
 	restoreContainerName = "etcd-restore"
-	etcdRestoreImage     = "FIXME"
 	restoredFromLabel    = "etcd.improbable.io/restored-from"
 	restorePodLabel      = "etcd.improbable.io/restore-pod"
 )
@@ -309,10 +310,16 @@ func restorePodNamespacedName(peer etcdv1alpha1.EtcdPeer) types.NamespacedName {
 		Name:      restorePodName(peer),
 	}
 }
+
+func stripPortFromURL(advertiseURL *url.URL) string {
+	return strings.Split(advertiseURL.Host, ":")[0]
+}
+
 func podForRestore(restore etcdv1alpha1.EtcdRestore,
 	peer etcdv1alpha1.EtcdPeer,
 	pvcName string,
 	restoreImage string) *corev1.Pod {
+
 	pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            restorePodName(peer),
@@ -320,6 +327,24 @@ func podForRestore(restore etcdv1alpha1.EtcdRestore,
 			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&restore, etcdv1alpha1.GroupVersion.WithKind("EtcdRestore"))},
 		},
 		Spec: corev1.PodSpec{
+			HostAliases: []corev1.HostAlias{
+				{
+					// We've got a problematic Catch-22 here. We need to set the peer advertise URL to be the real URL
+					// that the eventual peer will use. We know that URL at this point (and provide it as an environment
+					// variable later on).
+					//
+					// However without the Kubernetes service to provide DNS and the Hostnames set on the pods the URL
+					// can't actually be resolved. Unfortunately, the etcd API will try to resolve the advertise URL to
+					// check it's real.
+					//
+					// So, we need to fake it so it resolves to something. It doesn't need to have anything on the other
+					// end. So long as an IP address comes back the etcd API is satisfied.
+					IP: "127.0.0.1",
+					Hostnames: []string{
+						stripPortFromURL(advertiseURL(peer, etcdPeerPort)),
+					},
+				},
+			},
 			Volumes: []corev1.Volume{
 				{
 					Name: "etcd-data",
@@ -450,8 +475,7 @@ func clusterForRestore(restore etcdv1alpha1.EtcdRestore) *etcdv1alpha1.EtcdClust
 		},
 		Spec: restore.Spec.ClusterTemplate.Spec,
 	}
-	// TODO remove this?
-	// Slap a label on it so we can see it later
+	// Slap a label on it. This is pretty informational. Just so a user can tell where this thing came from later on.
 	markCluster(restore, cluster)
 	return cluster
 }
@@ -468,7 +492,7 @@ var _ handler.Mapper = &restoredFromMapper{}
 // garbage collected along with the peer.
 // So we can't use OwnerReference handler here.
 func (m *restoredFromMapper) Map(o handler.MapObject) []reconcile.Request {
-	requests := []reconcile.Request{}
+	var requests []reconcile.Request
 	labels := o.Meta.GetLabels()
 	if restoreName, found := labels[restoredFromLabel]; found {
 		requests = append(
