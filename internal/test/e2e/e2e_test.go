@@ -22,8 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	etcd "go.etcd.io/etcd/client"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -214,6 +212,17 @@ func installOperator(t *testing.T, kubectl *kubectlContext, kind *cluster.Contex
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		t.Log("Installing MinIO Operator and one-node instance")
+		err := kubectl.Apply("-f", filepath.Join(*fRepoRoot, "config", "test", "e2e", "minio"))
+		require.NoError(t, err)
+		//t.Log("Waiting for MinIO to be ready")
+		//err = kubectl.Wait("--for=condition=Available", "--timeout=300s", "service", "v1beta1.webhook.cert-manager.io")
+		//require.NoError(t, err)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		// Ensure CRDs exist in the cluster.
 		t.Log("Applying CRDs")
 		err := kubectl.Apply("--kustomize", filepath.Join(*fRepoRoot, "config", "crd"))
@@ -359,7 +368,7 @@ func TestE2E(t *testing.T) {
 	// This outer function is needed because call to t.Run does not block if
 	// t.Parallel is used in its test function.
 	// See https://github.com/golang/go/issues/17791#issuecomment-258527390
-	t.Run("Parallel", func(t *testing.T) {
+	/*t.Run("Parallel", func(t *testing.T) {
 		t.Run("SampleCluster", func(t *testing.T) {
 			t.Parallel()
 			rl := corev1.ResourceList{
@@ -431,7 +440,7 @@ func TestE2E(t *testing.T) {
 			defer cleanup()
 			versionTests(t, kubectl.WithDefaultNamespace(ns))
 		})
-	})
+	})*/
 }
 
 func backupTests(t *testing.T, kubectl *kubectlContext) {
