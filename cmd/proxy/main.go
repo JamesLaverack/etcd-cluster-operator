@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
+	"net/url"
 
 	flag "github.com/spf13/pflag"
 	"google.golang.org/grpc"
@@ -19,24 +20,26 @@ type proxyServer struct {
 	BucketURL string
 }
 
-// Both pb.DownloadRequest and pb.UploadRequest satisfy this interface.
-type backupReference interface {
-	GetClusterIdentifier() string
-	GetBackupIdentifier() string
-}
-
-// Translate a reference to a backup into an expected object name.
-func (ps *proxyServer) objectPathForBackup(ref backupReference) string {
-	return fmt.Sprintf("%s/%s", ref.GetClusterIdentifier(), ref.GetBackupIdentifier())
+// Turn a full object URL like `gs://my-bucket/my-dir/my-obj.db` into a bucket URL (`gs://my-bucket`) and an object path
+// (`/my-dir/my-obj.db`).
+func parseBackupUrl(backupUrl string) (string, string, error) {
+	u, err := url.Parse(backupUrl)
+	if err != nil {
+		return "", "", err
+	}
+	return fmt.Sprintf("%s://%s", u.Scheme, u.Host), u.Path, nil
 }
 
 func (ps *proxyServer) Download(ctx context.Context, req *pb.DownloadRequest) (*pb.DownloadReply, error) {
-	bucket, err := blob.OpenBucket(ctx, ps.BucketURL)
+	bucketName, objectPath, err := parseBackupUrl(req.BackupUrl)
+	if err != nil {
+		return nil, err
+	}
+	bucket, err := blob.OpenBucket(ctx, bucketName)
 	if err != nil {
 		return nil, err
 	}
 
-	objectPath := ps.objectPathForBackup(req)
 	blobReader, err := bucket.NewReader(ctx, objectPath, nil)
 	if err != nil {
 		return nil, err
