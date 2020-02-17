@@ -56,15 +56,10 @@ func main() {
 		"URL of the proxy server to use to download the backup from remote storage.")
 	fmt.Printf("Using Bucket URL %s\n", *uploadProxyURL)
 
-	backupClusterIdentifier := pflag.String("backup-cluster-identifier",
+	backupURL := pflag.String("backup-url",
 		"",
-		"Identifier for the cluster that the backup was taken from.")
-	fmt.Printf("Requesting backup from %s\n", *backupClusterIdentifier)
-
-	backupIdentifier := pflag.String("backup-identifier",
-		"",
-		"Identifier for the backup.")
-	fmt.Printf("Requesting backup from %s\n", *backupIdentifier)
+		"URL for the backup.")
+	fmt.Printf("Requesting backup from %s\n", *backupURL)
 
 	timeoutSeconds := pflag.Int64("timeout-seconds",
 		300,
@@ -81,8 +76,8 @@ func main() {
 	}
 	c := pb.NewProxyClient(conn)
 	r, err := c.Download(ctx, &pb.DownloadRequest{
-		ClusterIdentifier: *backupClusterIdentifier,
-		BackupIdentifier:  *backupIdentifier,
+		// The inconsistent capitalisation of 'URL' is because of https://github.com/golang/protobuf/issues/156
+		BackupUrl: *backupURL,
 	})
 	err = conn.Close()
 	if err != nil {
