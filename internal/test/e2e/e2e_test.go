@@ -207,7 +207,9 @@ func installOperator(t *testing.T, kubectl *kubectlContext, kind *cluster.Contex
 		err := kubectl.Apply("--validate=false", "--filename=https://github.com/jetstack/cert-manager/releases/download/v0.11.0/cert-manager.yaml")
 		require.NoError(t, err)
 		t.Log("Waiting for cert-manager to be ready")
-		err = kubectl.Wait("--for=condition=Available", "--timeout=300s", "apiservice", "v1beta1.webhook.cert-manager.io")
+		// We can't wait on the `minio-hl-svc` service (https://github.com/kubernetes/kubernetes/issues/80828) so instead
+		// wait for the underlying pod. It's got a deterministic name (`minio-0`) so this isn't so bad.
+		err = kubectl.Wait("--for=condition=Ready", "--timeout=300s", "pod", "minio-0")
 		require.NoError(t, err)
 	}()
 
