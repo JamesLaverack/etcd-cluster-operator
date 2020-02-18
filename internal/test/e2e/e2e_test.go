@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -368,7 +370,7 @@ func TestE2E(t *testing.T) {
 	// This outer function is needed because call to t.Run does not block if
 	// t.Parallel is used in its test function.
 	// See https://github.com/golang/go/issues/17791#issuecomment-258527390
-	/*t.Run("Parallel", func(t *testing.T) {
+	t.Run("Parallel", func(t *testing.T) {
 		t.Run("SampleCluster", func(t *testing.T) {
 			t.Parallel()
 			rl := corev1.ResourceList{
@@ -440,7 +442,7 @@ func TestE2E(t *testing.T) {
 			defer cleanup()
 			versionTests(t, kubectl.WithDefaultNamespace(ns))
 		})
-	})*/
+	})
 }
 
 func backupTests(t *testing.T, kubectl *kubectlContext) {
