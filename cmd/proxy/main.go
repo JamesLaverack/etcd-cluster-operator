@@ -12,7 +12,7 @@ import (
 	flag "github.com/spf13/pflag"
 	"google.golang.org/grpc"
 
-	pb "github.com/improbable-eng/etcd-cluster-operator/api/proxy"
+	pb "github.com/improbable-eng/etcd-cluster-operator/api/proxy/v1"
 )
 
 type proxyServer struct {

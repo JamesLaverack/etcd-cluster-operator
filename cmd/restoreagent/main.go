@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	pb "github.com/improbable-eng/etcd-cluster-operator/api/proxy"
+	pb "github.com/improbable-eng/etcd-cluster-operator/api/proxy/v1"
 	"google.golang.org/grpc"
 	"io"
 	"os"
