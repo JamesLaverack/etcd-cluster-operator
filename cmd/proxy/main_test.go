@@ -17,6 +17,7 @@ var backupUrlTests = []struct {
 		"s3://mybucket?endpoint=my.minio.local:8080&disableSSL=true&s3ForcePathStyle=true",
 		"/foo/bar.mkv"},
 }
+
 func TestParseBackupURL(t *testing.T) {
 	for _, tt := range backupUrlTests {
 		t.Run(tt.blobUrl, func(t *testing.T) {

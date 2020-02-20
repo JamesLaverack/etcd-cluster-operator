@@ -119,7 +119,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Copying restored data directory %s into correct PV on path %s\n", restoreDir, etcdDataDir)
+	fmt.Printf("Copying restored data directory %s into correct PV on path %s\n", restoreDir, *etcdDataDir)
 	err = copy.Copy(restoreDir, *etcdDataDir)
 	if err != nil {
 		panic(err)

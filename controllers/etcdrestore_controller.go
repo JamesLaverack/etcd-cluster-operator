@@ -404,7 +404,7 @@ func (r *EtcdRestoreReconciler) podForRestore(restore etcdv1alpha1.EtcdRestore,
 				{
 					Name:  restoreContainerName,
 					Image: r.RestorePodImage,
-					Args: []string{},
+					Args:  []string{},
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      "etcd-data",

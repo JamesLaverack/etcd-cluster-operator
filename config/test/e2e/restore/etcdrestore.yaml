@@ -4,7 +4,7 @@ metadata:
   name: simple-restore
 spec:
   source:
-    objectUrl: s3://backups.test.improbable.io/snapshot.db
+    objectUrl: s3://backups.test.improbable.io/snapshot.db?endpoint=minio.minio.svc&disableSSL=true&s3ForcePathStyle=true
   clusterTemplate:
     clusterName: restored-cluster
     spec:
