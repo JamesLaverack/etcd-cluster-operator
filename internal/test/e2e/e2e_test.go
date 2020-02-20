@@ -461,7 +461,21 @@ func TestE2E(t *testing.T) {
 }
 
 func restoreTests(t *testing.T, kubectl *kubectlContext) {
-	t.Log("Given a backup exists in MinIO.")
+	t.Log("Create EtcdRestore from backup in MinIO")
+	err := kubectl.Apply("--filename",
+		filepath.Join(*fRepoRoot, "config", "test", "e2e", "restore", "etcdrestore.yaml"))
+	require.NoError(t, err)
+
+	t.Log("And the data is still available.")
+	out, err := etcdctlInCluster(
+		kubectl,
+		time.Minute*2,
+		"restored-cluster",
+		"get", "--print-value-only", "--", "foo",
+	)
+	require.NoError(t, err, out)
+	assert.Equal(t, "bar\n", out)
+	require.NoError(t, err, out)
 }
 
 func backupTests(t *testing.T, kubectl *kubectlContext) {
