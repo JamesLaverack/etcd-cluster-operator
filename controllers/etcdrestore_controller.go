@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"github.com/improbable-eng/etcd-cluster-operator/internal/reconcilerevent"
 	"k8s.io/client-go/tools/record"
+	"net"
 	"net/url"
-	"path/filepath"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -29,6 +29,8 @@ type EtcdRestoreReconciler struct {
 	Log             logr.Logger
 	Recorder        record.EventRecorder
 	RestorePodImage string
+	ProxyURL        url.URL
+	TimeoutSeconds  int64
 }
 
 // +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdrestores,verbs=get;list;watch
@@ -248,7 +250,7 @@ func (r *EtcdRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error)
 		if restorePod == nil {
 			// We couldn't find this restore pod. Create it.
 			log.Info("Defining restore pod", "pod-index", i)
-			toCreatePod := podForRestore(restore, expectedPeers[i], expectedPVCs[i].Name, r.RestorePodImage)
+			toCreatePod := r.podForRestore(restore, expectedPeers[i], expectedPVCs[i].Name)
 			log.Info("Launching restore pod", "pod-name", name(toCreatePod))
 			// No Pod. Launch it! We then exit. Next time we'll make the next one.
 			err := r.Create(ctx, toCreatePod)
@@ -351,11 +353,11 @@ func stripPortFromURL(advertiseURL *url.URL) string {
 	return strings.Split(advertiseURL.Host, ":")[0]
 }
 
-func podForRestore(restore etcdv1alpha1.EtcdRestore,
+func (r *EtcdRestoreReconciler) podForRestore(restore etcdv1alpha1.EtcdRestore,
 	peer etcdv1alpha1.EtcdPeer,
-	pvcName string,
-	restoreImage string) *corev1.Pod {
+	pvcName string) *corev1.Pod {
 
+	const snapshotDir = "/tmp/snapshot"
 	pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            restorePodName(peer),
@@ -375,7 +377,7 @@ func podForRestore(restore etcdv1alpha1.EtcdRestore,
 					//
 					// So, we need to fake it so it resolves to something. It doesn't need to have anything on the other
 					// end. So long as an IP address comes back the etcd API is satisfied.
-					IP: "127.0.0.1",
+					IP: net.IPv4(127, 0, 0, 1).String(),
 					Hostnames: []string{
 						stripPortFromURL(advertiseURL(peer, etcdPeerPort)),
 					},
@@ -401,35 +403,8 @@ func podForRestore(restore etcdv1alpha1.EtcdRestore,
 			Containers: []corev1.Container{
 				{
 					Name:  restoreContainerName,
-					Image: restoreImage,
-					Env: []corev1.EnvVar{
-						{
-							Name:  "RESTORE_ETCD_PEER_NAME",
-							Value: peer.Name,
-						},
-						{
-							Name:  "RESTORE_ETCD_CLUSTER_NAME",
-							Value: restore.ClusterName,
-						},
-						{
-							Name:  "RESTORE_ETCD_INITIAL_CLUSTER",
-							Value: staticBootstrapInitialCluster(*peer.Spec.Bootstrap.Static),
-						},
-						{
-							Name:  "RESTORE_ETCD_ADVERTISE_URL",
-							Value: advertiseURL(peer, etcdPeerPort).String(),
-						},
-						{
-							Name: "RESTORE_ETCD_DATA_DIR",
-							// Must match the data dir we use in the peer's pods
-							Value: etcdDataMountPath,
-						},
-						{
-							Name: "RESTORE_SNAPSHOT_DIR",
-							// doesn't matter, must be some scratch storage though. We assume it's empty.
-							Value: "/tmp/snapshot",
-						},
-					},
+					Image: r.RestorePodImage,
+					Args: []string{},
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      "etcd-data",
@@ -439,7 +414,7 @@ func podForRestore(restore etcdv1alpha1.EtcdRestore,
 						{
 							Name:      "snapshot",
 							ReadOnly:  false,
-							MountPath: "/tmp/snapshot",
+							MountPath: snapshotDir,
 						},
 					},
 				},
@@ -449,55 +424,24 @@ func podForRestore(restore etcdv1alpha1.EtcdRestore,
 		},
 	}
 
-	// Create a helper to append environment variables to the restore container.
-	addEnvVar := func(ev corev1.EnvVar) {
+	// Create a helper to append flags
+	stringFlag := func(flag string, value string) {
 		// We know there's only one container and it's the first in the list
-		pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, ev)
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, fmt.Sprintf("--%s='%s'", flag, value))
+	}
+	int64Flag := func(flag string, value int64) {
+		// We know there's only one container and it's the first in the list
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, fmt.Sprintf("--%s='%d'", flag, value))
 	}
 
-	addEnvVar(corev1.EnvVar{
-		Name:  "RESTORE_BUCKET_URL",
-		Value: restore.Spec.Source.Bucket.BucketURL})
-	addEnvVar(corev1.EnvVar{
-		Name:  "RESTORE_OBJECT_PATH",
-		Value: restore.Spec.Source.Bucket.ObjectPath})
-	if creds := restore.Spec.Source.Bucket.Credentials; creds != nil {
-		if creds.GoogleCloud != nil {
-			// Mount the credentials and provide the `GOOGLE_APPLICATION_CREDENTIALS` environment variable to the
-			// mounted path. See https://cloud.google.com/docs/authentication/production#obtaining_and_providing_service_account_credentials_manually
-			const volumeName = "google-cloud-credentials"
-			const mountPath = "/var/credentials/google-cloud"
-			// use a constant file name. With the mount path that means that the credentials will be available in the
-			// pod at /var/credentials/google-cloud/credentials.json
-			const fileName = "credentials.json"
-			pod.Spec.Volumes = append(pod.Spec.Volumes,
-				corev1.Volume{
-					Name: volumeName,
-					VolumeSource: corev1.VolumeSource{
-						Secret: &corev1.SecretVolumeSource{
-							SecretName: creds.GoogleCloud.SecretKeyRef.Name,
-							Items: []corev1.KeyToPath{
-								{
-									Key:  creds.GoogleCloud.SecretKeyRef.Key,
-									Path: fileName,
-								},
-							},
-						},
-					},
-				})
-			pod.Spec.Containers[0].VolumeMounts = append(
-				pod.Spec.Containers[0].VolumeMounts,
-				corev1.VolumeMount{
-					Name:      volumeName,
-					ReadOnly:  true,
-					MountPath: mountPath,
-				})
-
-			addEnvVar(corev1.EnvVar{
-				Name:  "GOOGLE_APPLICATION_CREDENTIALS",
-				Value: filepath.Join(mountPath, fileName)})
-		}
-	}
+	stringFlag("etcd-peer-name", peer.Name)
+	stringFlag("etcd-cluster-name", restore.ClusterName)
+	stringFlag("etcd-initial-cluster", staticBootstrapInitialCluster(*peer.Spec.Bootstrap.Static))
+	stringFlag("etcd-peer-advertise-url", advertiseURL(peer, etcdPeerPort).String())
+	stringFlag("etcd-data-dir", etcdDataMountPath)
+	stringFlag("snapshot-dir", snapshotDir)
+	stringFlag("proxy-url", r.ProxyURL.String())
+	int64Flag("timeout-seconds", r.TimeoutSeconds)
 
 	markPod(restore, &pod)
 	return &pod

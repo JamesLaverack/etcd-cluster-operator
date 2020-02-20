@@ -1,27 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: proxy
   namespace: system
   labels:
-    control-plane: controller-manager
+    control-plane: proxy
 spec:
   selector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: proxy
   replicas: 1
   template:
     metadata:
       labels:
-        control-plane: controller-manager
+        control-plane: proxy
     spec:
       containers:
-      - command:
-        - /manager
         args:
-        - --enable-leader-election
-        - --restore-image-name=etcd-restore-agent:test
-        - --proxy-url=proxy.eco-system.svc
+          - --api-port 8080
         image: controller:latest
         name: manager
         resources:
@@ -32,3 +28,18 @@ spec:
             cpu: 100m
             memory: 20Mi
       terminationGracePeriodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: proxy
+  namespace: system
+  labels:
+    control-plane: proxy
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+  selector:
+    control-plane: proxy

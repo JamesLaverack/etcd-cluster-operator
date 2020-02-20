@@ -51,10 +51,10 @@ func main() {
 		"Location of a temporary directory to make the backup into")
 	fmt.Printf("Using snapshot directory %s\n", *snapshotDir)
 
-	uploadProxyURL := pflag.String("upload-proxy-url",
+	proxyURL := pflag.String("proxy-url",
 		"",
 		"URL of the proxy server to use to download the backup from remote storage.")
-	fmt.Printf("Using Bucket URL %s\n", *uploadProxyURL)
+	fmt.Printf("Using Bucket URL %s\n", *proxyURL)
 
 	backupURL := pflag.String("backup-url",
 		"",
@@ -70,7 +70,7 @@ func main() {
 	ctx, ctxCancel := context.WithTimeout(context.Background(), time.Second*time.Duration(*timeoutSeconds))
 	defer ctxCancel()
 
-	conn, err := grpc.Dial(*uploadProxyURL)
+	conn, err := grpc.Dial(*proxyURL)
 	if err != nil {
 		panic(err)
 	}

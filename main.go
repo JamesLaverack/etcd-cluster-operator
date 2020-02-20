@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"net/url"
 	"os"
 
 	flag "github.com/spf13/pflag"
@@ -25,6 +27,10 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
+const (
+	defaultRestoreTimeoutSeconds = 300
+)
+
 func init() {
 	_ = clientgoscheme.AddToScheme(scheme)
 
@@ -37,6 +43,7 @@ func main() {
 	var enableLeaderElection bool
 	var printVersion bool
 	var restoreImageName string
+	var proxyURLString string
 
 	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
@@ -45,6 +52,7 @@ func main() {
 	flag.BoolVar(&printVersion, "version", false,
 		"Print version to stdout and exit")
 	flag.StringVar(&restoreImageName, "restore-image-name", "", "The Docker image to use to perform a restore")
+	flag.StringVar(&proxyURLString, "proxy-url", "", "The URL of the upload/download proxy")
 	flag.Parse()
 
 	if printVersion {
@@ -55,6 +63,11 @@ func main() {
 	ctrl.SetLogger(zap.Logger(true))
 
 	setupLog.Info("Starting manager", "version", version.Version)
+
+	proxyURL, err := url.Parse(proxyURLString)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:             scheme,
@@ -106,6 +119,8 @@ func main() {
 		Log:             ctrl.Log.WithName("controllers").WithName("EtcdRestore"),
 		Recorder:        mgr.GetEventRecorderFor("etcdrestore-reconciler"),
 		RestorePodImage: restoreImageName,
+		ProxyURL:        *proxyURL,
+		TimeoutSeconds:  defaultRestoreTimeoutSeconds,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EtcdRestore")
 		os.Exit(1)
