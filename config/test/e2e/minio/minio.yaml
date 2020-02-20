@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: minio
+  labels:
+    app.kubernetes.io/name: minio
+spec:
+  ports:
+    - port: 9000
+      name: minio
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: minio
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: minio
+  labels:
+    app.kubernetes.io/name: minio
+spec:
+  serviceName: minio
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio
+          args:
+            - server
+            - /data
+          ports:
+            - containerPort: 9000
+              name: minio
+          volumeMounts:
+            # This ends up being purely backed by this ConfigMap as there is no way to support multiple mounts
+            # https://github.com/minio/minio/issues/5080
+            - name: example-backup
+              mountPath: /data/example-backup
+      volumes:
+        - name: example-backup
+          configMap:
+            name: example-backup

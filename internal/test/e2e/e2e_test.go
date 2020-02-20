@@ -207,21 +207,22 @@ func installOperator(t *testing.T, kubectl *kubectlContext, kind *cluster.Contex
 		err := kubectl.Apply("--validate=false", "--filename=https://github.com/jetstack/cert-manager/releases/download/v0.11.0/cert-manager.yaml")
 		require.NoError(t, err)
 		t.Log("Waiting for cert-manager to be ready")
-		// We can't wait on the `minio-hl-svc` service (https://github.com/kubernetes/kubernetes/issues/80828) so instead
-		// wait for the underlying pod. It's got a deterministic name (`minio-0`) so this isn't so bad.
-		err = kubectl.Wait("--for=condition=Ready", "--timeout=300s", "pod", "minio-0")
+		err = kubectl.Wait("--for=condition=Available", "--timeout=300s", "apiservice", "v1beta1.webhook.cert-manager.io")
 		require.NoError(t, err)
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		t.Log("Installing MinIO Operator and one-node instance")
-		err := kubectl.Apply("-f", filepath.Join(*fRepoRoot, "config", "test", "e2e", "minio"))
+		t.Log("Installing MinIO")
+		err := kubectl.Apply("-k", filepath.Join(*fRepoRoot, "config", "test", "e2e", "minio"))
 		require.NoError(t, err)
-		//t.Log("Waiting for MinIO to be ready")
-		//err = kubectl.Wait("--for=condition=Available", "--timeout=300s", "service", "v1beta1.webhook.cert-manager.io")
-		//require.NoError(t, err)
+		t.Log("Waiting for MinIO to be ready")
+		// We can't wait on the `minio` service (https://github.com/kubernetes/kubernetes/issues/80828) so instead
+		// wait for the underlying pod. It's got a deterministic name (`minio-0`) so this isn't so bad.
+		time.Sleep(time.Second * 10)
+		err = kubectl.Wait("--namespace=minio", "--for=condition=Ready", "--timeout=300s", "pod", "minio-0")
+		require.NoError(t, err)
 	}()
 
 	wg.Add(1)
@@ -431,6 +432,18 @@ func TestE2E(t *testing.T) {
 			defer cleanup()
 			backupTests(t, kubectl.WithT(t).WithDefaultNamespace(ns))
 		})
+		t.Run("Restore", func(t *testing.T) {
+			t.Parallel()
+			rl := corev1.ResourceList{
+				// 1-node cluster
+				// set job
+				corev1.ResourceCPU:    resource.MustParse("300m"),
+				corev1.ResourceMemory: resource.MustParse("250Mi"),
+			}
+			ns, cleanup := NamespaceForTest(t, kubectl, rl)
+			defer cleanup()
+			restoreTests(t, kubectl.WithT(t).WithDefaultNamespace(ns))
+		})
 		t.Run("Version", func(t *testing.T) {
 			t.Parallel()
 			rl := corev1.ResourceList{
@@ -445,6 +458,10 @@ func TestE2E(t *testing.T) {
 			versionTests(t, kubectl.WithDefaultNamespace(ns))
 		})
 	})
+}
+
+func restoreTests(t *testing.T, kubectl *kubectlContext) {
+	t.Log("Given a backup exists in MinIO.")
 }
 
 func backupTests(t *testing.T, kubectl *kubectlContext) {
