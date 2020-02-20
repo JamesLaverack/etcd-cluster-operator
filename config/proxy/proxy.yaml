@@ -16,10 +16,10 @@ spec:
         control-plane: proxy
     spec:
       containers:
+      - name: proxy
         args:
-          - --api-port 8080
-        image: controller:latest
-        name: manager
+          - --api-port=8080
+        image: proxy:latest
         resources:
           limits:
             cpu: 100m
