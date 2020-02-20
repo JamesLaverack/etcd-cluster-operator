@@ -28,16 +28,18 @@ type proxyServer struct {
 
 // Turn a full object URL like `gs://my-bucket/my-dir/my-obj.db` into a bucket URL (`gs://my-bucket`) and an object path
 // (`/my-dir/my-obj.db`).
-func parseBackupUrl(backupUrl string) (string, string, error) {
+func parseBackupURL(backupUrl string) (string, string, error) {
 	u, err := url.Parse(backupUrl)
 	if err != nil {
 		return "", "", err
 	}
-	return fmt.Sprintf("%s://%s", u.Scheme, u.Host), u.Path, nil
+	path := u.Path
+	u.Path = ""
+	return u.String(), path, nil
 }
 
 func (ps *proxyServer) Download(ctx context.Context, req *pb.DownloadRequest) (*pb.DownloadResponse, error) {
-	bucketName, objectPath, err := parseBackupUrl(req.BackupUrl)
+	bucketName, objectPath, err := parseBackupURL(req.BackupUrl)
 	if err != nil {
 		return nil, err
 	}
