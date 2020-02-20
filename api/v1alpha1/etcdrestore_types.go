@@ -5,30 +5,8 @@ import (
 )
 
 type EtcdRestoreSource struct {
-
-	// Note: This structure requires that you provide a `bucket`. But is designed such that you could modify this struct
-	//       in the future to add a new way to get the snapshot data. This would require a code change but would not
-	//       require a change in existing YAML files that use the current `restore.spec.source.bucket` path.
-
 	// Bucket identifies a generic blob Storage bucket to pull the snapshot from.
-	Bucket EtcdRestoreSourceBucket `json:"bucket"`
-}
-
-type EtcdRestoreSourceBucket struct {
-	// BucketURL is the name of the storage bucket. This is a go-cloud bucket URL https://gocloud.dev/howto/blob/ and
-	// should use a URL scheme of the bucket provider. For example `s3://my-amazon-bucket` or
-	// `gs://my-google-cloud-bucket`.
-	// +kubebuilder:validation:MinLength=3
-	// +kubebuilder:validation:MaxLength=222
-	BucketURL string `json:"bucketURL"`
-
-	// ObjectPath is the path to the object inside the bucket.
-	// +kubebuilder:validation:MinLength=1
-	ObjectPath string `json:"objectPath"`
-
-	// Credentials holds the method of obtaining credentials that will be passed to the storage provider.
-	// +optional
-	Credentials *BucketCredentials `json:"credentials,omitempty"`
+	ObjectURL string `json:"objectUrl"`
 }
 
 // A template to define the cluster we'll make. The namespace will be the same as this restore resource.
