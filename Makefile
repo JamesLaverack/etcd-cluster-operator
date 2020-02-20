@@ -116,9 +116,6 @@ go-get-patch:
 verify-go-get-patch:
 	./hack/verify.sh make -s go-get-patch
 
-docker-restoreagent-build: test
-	docker build . --file restoreagent.Dockerfile -t ${RESTORE_AGENT_IMG}
-
 # Build the docker image. This should be used for release versions, and builds the image on top of distroless.
 docker-build:
 	docker build . --target release --build-arg VERSION=$(VERSION) -t ${IMG}
@@ -132,6 +129,9 @@ docker-build-proxy:
 
 docker-build-backup-agent:
 	docker build --build-arg VERSION=$(VERSION) --tag "eco-backup-agent:$(VERSION)" --file build/package/backup-agent.Dockerfile .
+
+docker-restoreagent-build: test
+	docker build --build-arg VERSION=$(VERSION) --tag $(RESTORE_AGENT_IMG) --file build/package/restore-agent.Dockerfile .
 
 # Push the docker image
 docker-push:
