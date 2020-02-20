@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags)
 # Image URL to use all building/pushing image targets
 IMG ?= "controller:$(VERSION)"
-RESTORE_AGENT_IMG ?= "restore-agent:$(VERSION)"
+RESTORE_AGENT_IMG ?= "eco-restore-agent:$(VERSION)"
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 CRD_OPTIONS ?= "crd:trivialVersions=true"
 

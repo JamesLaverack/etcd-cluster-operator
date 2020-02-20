@@ -74,7 +74,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	c := pb.NewProxyClient(conn)
+	c := pb.NewProxyServiceClient(conn)
 	r, err := c.Download(ctx, &pb.DownloadRequest{
 		// The inconsistent capitalisation of 'URL' is because of https://github.com/golang/protobuf/issues/156
 		BackupUrl: *backupURL,

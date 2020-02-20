@@ -5,19 +5,25 @@ import (
 	"fmt"
 	"gocloud.dev/blob"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/url"
+	"os"
 
 	flag "github.com/spf13/pflag"
 	"google.golang.org/grpc"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	pb "github.com/improbable-eng/etcd-cluster-operator/api/proxy/v1"
+	"github.com/improbable-eng/etcd-cluster-operator/version"
+)
+
+var (
+	setupLog = ctrl.Log.WithName("setup")
 )
 
 type proxyServer struct {
-	pb.UnimplementedProxyServer
-	BucketURL string
+	pb.UnimplementedProxyServiceServer
 }
 
 // Turn a full object URL like `gs://my-bucket/my-dir/my-obj.db` into a bucket URL (`gs://my-bucket`) and an object path
@@ -30,7 +36,7 @@ func parseBackupUrl(backupUrl string) (string, string, error) {
 	return fmt.Sprintf("%s://%s", u.Scheme, u.Host), u.Path, nil
 }
 
-func (ps *proxyServer) Download(ctx context.Context, req *pb.DownloadRequest) (*pb.DownloadReply, error) {
+func (ps *proxyServer) Download(ctx context.Context, req *pb.DownloadRequest) (*pb.DownloadResponse, error) {
 	bucketName, objectPath, err := parseBackupUrl(req.BackupUrl)
 	if err != nil {
 		return nil, err
@@ -52,26 +58,35 @@ func (ps *proxyServer) Download(ctx context.Context, req *pb.DownloadRequest) (*
 		return nil, err
 	}
 
-	return &pb.DownloadReply{Backup: backup}, nil
+	return &pb.DownloadResponse{Backup: backup}, nil
 }
 
 func main() {
-	// Setup defaults for expected configuration keys
-	var apiPort = flag.Int("api-port", 8080, "Port to serve the API on.")
+	printVersion := flag.Bool("version", false, "Print the version to stdout and exit")
+	apiPort := flag.Int("api-port", 8080, "Port to serve the API on")
 	flag.Parse()
+
+	if *printVersion {
+		fmt.Println(version.Version)
+		os.Exit(0)
+	}
+	ctrl.SetLogger(zap.Logger(true))
+
+	setupLog.Info("Starting etcd-cluster-controller upload/download Proxy service", "version", version.Version)
 
 	// Launch gRPC server
 	grpcAddress := fmt.Sprintf(":%d", *apiPort)
-	log.Printf("Using %q as listen address for proxy server", grpcAddress)
+	setupLog.Info("Listening", "grpc-address", grpcAddress)
 	listener, err := net.Listen("tcp", grpcAddress)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		setupLog.Error(err, "Failed to listen")
+		os.Exit(1)
 	}
 
-	log.Printf("Starting etcd-cluster-controller upload/download Proxy service")
 	srv := grpc.NewServer()
-	pb.RegisterProxyServer(srv, &proxyServer{})
+	pb.RegisterProxyServiceServer(srv, &proxyServer{})
 	if err := srv.Serve(listener); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+		setupLog.Error(err, "Failed to serve")
+		os.Exit(1)
 	}
 }
