@@ -53,4 +53,7 @@ spec:
       volumes:
         - name: example-backup
           configMap:
+            items:
+              - key: snapshot.db
+                path: backups.test.improbable.io/snapshot.db
             name: example-backup

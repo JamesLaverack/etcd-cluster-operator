@@ -4,6 +4,7 @@ metadata:
   name: simple-restore
 spec:
   source:
+    # See https://gocloud.dev/howto/blob/#s3-compatible for details on how this query string works.
     objectUrl: s3://backups.test.improbable.io/snapshot.db?endpoint=minio.minio.svc&disableSSL=true&s3ForcePathStyle=true
   clusterTemplate:
     clusterName: restored-cluster

@@ -6,5 +6,5 @@ images:
 - name: controller
   newName: etcd-cluster-operator
   newTag: test
-- name: eco-cluster-proxy
+- name: eco-proxy
   newTag: test

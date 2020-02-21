@@ -4,7 +4,7 @@ configMapGenerator:
   - name: example-backup
     namespace: minio
     files:
-      - backups.test.improbable.io/snapshot.db=snapshot.db
+      - snapshot.db
 resources:
   - minio.yaml
 generatorOptions:
