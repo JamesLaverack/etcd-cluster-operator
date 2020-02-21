@@ -25,53 +25,56 @@ func main() {
 	etcdPeerName := pflag.String("etcd-peer-name",
 		"",
 		"Name of this peer, must match the name of the eventual peer")
-	fmt.Printf("Using etcd peer name %s\n", *etcdPeerName)
 
 	etcdClusterName := pflag.String("etcd-cluster-name",
 		"",
 		"Name of this cluster, must match the name of the eventual cluster")
-	fmt.Printf("Using etcd cluster name %s\n", *etcdClusterName)
 
 	etcdInitialCluster := pflag.String("etcd-initial-cluster",
 		"",
 		"Comma separated list of the peer advertise URLs of the complete eventual cluster, including our own.")
-	fmt.Printf("Using etcd initial cluster %s\n", *etcdInitialCluster)
 
 	etcdAdvertiseURL := pflag.String("etcd-peer-advertise-url",
 		"",
 		"The peer advertise URL of *this* peer, must match the one for the eventual cluster")
-	fmt.Printf("Using advertise URL %s\n", *etcdAdvertiseURL)
 
 	etcdDataDir := pflag.String("etcd-data-dir",
 		"/var/etcd",
 		"Location of the etcd data directory to restore into.")
-	fmt.Printf("Using etcd data directory %s\n", *etcdDataDir)
 
 	snapshotDir := pflag.String("snapshot-dir",
 		"/tmp/snapshot",
 		"Location of a temporary directory to make the backup into")
-	fmt.Printf("Using snapshot directory %s\n", *snapshotDir)
 
 	proxyURL := pflag.String("proxy-url",
 		"",
 		"URL of the proxy server to use to download the backup from remote storage.")
-	fmt.Printf("Using Bucket URL %s\n", *proxyURL)
 
 	backupURL := pflag.String("backup-url",
 		"",
 		"URL for the backup.")
-	fmt.Printf("Requesting backup from %s\n", *backupURL)
 
 	timeoutSeconds := pflag.Int64("timeout-seconds",
 		300,
 		"Timeout, in seconds, of the whole restore operation.")
+
+	pflag.Parse()
+
+	fmt.Printf("Using etcd peer name %s\n", *etcdPeerName)
+	fmt.Printf("Using etcd cluster name %s\n", *etcdClusterName)
+	fmt.Printf("Using etcd initial cluster %s\n", *etcdInitialCluster)
+	fmt.Printf("Using advertise URL %s\n", *etcdAdvertiseURL)
+	fmt.Printf("Using etcd data directory %s\n", *etcdDataDir)
+	fmt.Printf("Using snapshot directory %s\n", *snapshotDir)
+	fmt.Printf("Using Bucket URL %s\n", *proxyURL)
+	fmt.Printf("Requesting backup from %s\n", *backupURL)
 	fmt.Printf("Using %d seconds timeout`n", timeoutSeconds)
 
 	// Pull the object from cloud storage into the snapshot directory.
 	ctx, ctxCancel := context.WithTimeout(context.Background(), time.Second*time.Duration(*timeoutSeconds))
 	defer ctxCancel()
 
-	conn, err := grpc.Dial(*proxyURL)
+	conn, err := grpc.Dial(*proxyURL, grpc.WithInsecure())
 	if err != nil {
 		panic(err)
 	}
