@@ -130,7 +130,7 @@ docker-build-proxy:
 docker-build-backup-agent:
 	docker build --build-arg VERSION=$(VERSION) --tag "eco-backup-agent:$(VERSION)" --file build/package/backup-agent.Dockerfile .
 
-docker-restoreagent-build: test
+docker-build-restore-agent: test
 	docker build --build-arg VERSION=$(VERSION) --tag $(RESTORE_AGENT_IMG) --file build/package/restore-agent.Dockerfile .
 
 # Push the docker image

@@ -182,7 +182,61 @@ func buildOperator(t *testing.T, ctx context.Context) (imageTar string, err erro
 	return imageTar, nil
 }
 
-func installOperator(t *testing.T, kubectl *kubectlContext, kind *cluster.Context, imageTar string) {
+func buildProxy(t *testing.T, ctx context.Context) (imageTar string, err error) {
+	t.Log("Building the proxy")
+	// Tag for running this test, for naming resources.
+	operatorImage := "eco-proxy:test"
+
+	// Build the operator.
+	out, err := exec.CommandContext(ctx, "make", "-C", *fRepoRoot, "docker-build-proxy", "VERSION=test").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w Output: %s", err, out)
+	}
+
+	// Bundle the image to a tar.
+	tmpDir, err := ioutil.TempDir("", "etcd-cluster-operator-e2e-test")
+	if err != nil {
+		return "", err
+	}
+
+	imageTar = filepath.Join(tmpDir, "eco-proxy.tar")
+
+	t.Log("Exporting the operator image")
+	out, err = exec.CommandContext(ctx, "docker", "save", "-o", imageTar, operatorImage).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w Output: %s", err, out)
+	}
+	return imageTar, nil
+}
+
+func buildRestoreAgent(t *testing.T, ctx context.Context) (imageTar string, err error) {
+	t.Log("Building the restore agent")
+	// Tag for running this test, for naming resources.
+	restoreAgentImage := "eco-restore-agent:test"
+
+	// Build the operator.
+	out, err := exec.CommandContext(ctx, "make", "-C", *fRepoRoot, "docker-build-restore-agent", "VERSION=test").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w Output: %s", err, out)
+	}
+
+	// Bundle the image to a tar.
+	tmpDir, err := ioutil.TempDir("", "etcd-cluster-operator-e2e-test")
+	if err != nil {
+		return "", err
+	}
+
+	imageTar = filepath.Join(tmpDir, "eco-restore-agent.tar")
+
+	t.Log("Exporting the operator image")
+	out, err = exec.CommandContext(ctx, "docker", "save", "-o", imageTar, restoreAgentImage).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w Output: %s", err, out)
+	}
+	return imageTar, nil
+}
+
+func installOperator(t *testing.T, kubectl *kubectlContext, kind *cluster.Context, imageTars []string) {
 	var wg sync.WaitGroup
 
 	wg.Add(1)
@@ -237,18 +291,20 @@ func installOperator(t *testing.T, kubectl *kubectlContext, kind *cluster.Contex
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		imageFile, err := os.Open(imageTar)
-		require.NoError(t, err)
-		defer func() {
-			assert.NoError(t, imageFile.Close(), "failed to close operator image tar")
-		}()
-		// Load the built image into the Kind cluster.
-		t.Log("Loading image in to Kind cluster")
-		nodes, err := kind.ListInternalNodes()
-		require.NoError(t, err)
-		for _, node := range nodes {
-			err := node.LoadImageArchive(imageFile)
+		for _, imageTar := range imageTars {
+			imageFile, err := os.Open(imageTar)
 			require.NoError(t, err)
+			defer func() {
+				assert.NoError(t, imageFile.Close(), "failed to close image tar")
+			}()
+			// Load the built image into the Kind cluster.
+			t.Log("Loading image in to Kind cluster")
+			nodes, err := kind.ListInternalNodes()
+			require.NoError(t, err)
+			for _, node := range nodes {
+				err := node.LoadImageArchive(imageFile)
+				require.NoError(t, err)
+			}
 		}
 	}()
 
@@ -276,9 +332,11 @@ func installOperator(t *testing.T, kubectl *kubectlContext, kind *cluster.Contex
 func setupKind(t *testing.T, ctx context.Context, stopped chan struct{}) *kubectlContext {
 	ctx, cancel := context.WithCancel(ctx)
 	var (
-		kind     *cluster.Context
-		imageTar string
-		wg       sync.WaitGroup
+		kind                 *cluster.Context
+		operatorImageTar     string
+		proxyImageTar        string
+		restoreAgentImageTar string
+		wg                   sync.WaitGroup
 	)
 	stoppedKind := make(chan struct{})
 	go func() {
@@ -289,11 +347,34 @@ func setupKind(t *testing.T, ctx context.Context, stopped chan struct{}) *kubect
 	go func() {
 		defer wg.Done()
 		var err error
-		imageTar, err = buildOperator(t, ctx)
+		operatorImageTar, err = buildOperator(t, ctx)
 		if err != nil {
 			assert.NoError(t, err)
 			cancel()
 		}
+
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var err error
+		proxyImageTar, err = buildProxy(t, ctx)
+		if err != nil {
+			assert.NoError(t, err)
+			cancel()
+		}
+
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var err error
+		restoreAgentImageTar, err = buildRestoreAgent(t, ctx)
+		if err != nil {
+			assert.NoError(t, err)
+			cancel()
+		}
+
 	}()
 	wg.Add(1)
 	go func() {
@@ -313,7 +394,7 @@ func setupKind(t *testing.T, ctx context.Context, stopped chan struct{}) *kubect
 		configPath: kind.KubeConfigPath(),
 	}
 
-	installOperator(t, kubectl, kind, imageTar)
+	installOperator(t, kubectl, kind, []string{operatorImageTar, proxyImageTar, restoreAgentImageTar})
 
 	return kubectl
 }

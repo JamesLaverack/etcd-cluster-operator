@@ -1,4 +1,3 @@
-# Build the manager binary
 FROM golang:1.13.1 as builder
 
 WORKDIR /workspace
@@ -11,16 +10,25 @@ RUN go mod download
 
 # Copy the go source
 COPY cmd/ cmd/
+COPY api/ api/
 COPY internal/ internal/
+COPY controllers/ controllers/
+COPY version/ version/
+
+ARG VERSION
+
+ENV CGO_ENABLED=0
+ENV GOOS=linux
+ENV GOARCH=amd64
+ENV GO111MODULE=on
+ENV GOFLAGS=-ldflags=-X=github.com/improbable-eng/etcd-cluster-operator/version.Version=${VERSION}
 
 # Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o restoreagent cmd/restoreagent/main.go
+RUN go build -o restore-agent cmd/restore-agent/main.go
 
-FROM gcr.io/distroless/static as release
+FROM gcr.io/distroless/static:nonroot as release
 WORKDIR /
-COPY --from=builder /workspace/restoreagent .
-# Need to run as root so that we can write to the PVC as root.
-# See https://github.com/improbable-eng/etcd-cluster-operator/issues/139
-USER root:root
+COPY --from=builder /workspace/restore-agent .
+USER nonroot:nonroot
 
-ENTRYPOINT ["/restoreagent"]
+ENTRYPOINT ["/restore-agent"]

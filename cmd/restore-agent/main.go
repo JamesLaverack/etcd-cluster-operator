@@ -5,8 +5,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	pb "github.com/improbable-eng/etcd-cluster-operator/api/proxy/v1"
-	"google.golang.org/grpc"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,6 +15,9 @@ import (
 	"go.etcd.io/etcd/clientv3/snapshot"
 	_ "gocloud.dev/blob/gcsblob"
 	_ "gocloud.dev/blob/s3blob"
+	"google.golang.org/grpc"
+
+	pb "github.com/improbable-eng/etcd-cluster-operator/api/proxy/v1"
 )
 
 func main() {
