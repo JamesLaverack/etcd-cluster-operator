@@ -353,10 +353,7 @@ func stripPortFromURL(advertiseURL *url.URL) string {
 	return strings.Split(advertiseURL.Host, ":")[0]
 }
 
-func (r *EtcdRestoreReconciler) podForRestore(restore etcdv1alpha1.EtcdRestore,
-	peer etcdv1alpha1.EtcdPeer,
-	pvcName string) *corev1.Pod {
-
+func (r *EtcdRestoreReconciler) podForRestore(restore etcdv1alpha1.EtcdRestore, peer etcdv1alpha1.EtcdPeer, pvcName string) *corev1.Pod {
 	const snapshotDir = "/tmp/snapshot"
 	pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -405,6 +402,7 @@ func (r *EtcdRestoreReconciler) podForRestore(restore etcdv1alpha1.EtcdRestore,
 					Name:  restoreContainerName,
 					Image: r.RestorePodImage,
 					Args:  []string{},
+					Resources: *restore.Spec.ClusterTemplate.Spec.PodTemplate.Resources,
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      "etcd-data",
