@@ -40,6 +40,13 @@ spec:
         - name: copy-example
           image: busybox:1.28
           command: ['sh', '-c', 'mkdir -p /data/backups.test.improbable.io && cp /example/* /data/backups.test.improbable.io/']
+          volumeMounts:
+            # This ends up being purely backed by this ConfigMap as there is no way to support multiple mounts
+            # https://github.com/minio/minio/issues/5080
+            - name: data
+              mountPath: /data
+            - name: example-backup
+              mountPath: /example
       containers:
         - name: minio
           image: minio/minio
@@ -50,12 +57,8 @@ spec:
             - containerPort: 9000
               name: minio
           volumeMounts:
-            # This ends up being purely backed by this ConfigMap as there is no way to support multiple mounts
-            # https://github.com/minio/minio/issues/5080
             - name: data
               mountPath: /data
-            - name: example-backup
-              mountPath: /example
       volumes:
         - name: example-backup
           configMap:
