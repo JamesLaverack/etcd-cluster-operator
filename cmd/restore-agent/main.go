@@ -88,19 +88,26 @@ func main() {
 	ctx, ctxCancel := context.WithTimeout(context.Background(), time.Second*time.Duration(*timeoutSeconds))
 	defer ctxCancel()
 
+	fmt.Printf("Downloading backup file from Proxy %s\n", *backupURL)
 	conn, err := grpc.Dial(*proxyURL, grpc.WithInsecure())
 	if err != nil {
 		panic(err)
 	}
+
 	c := pb.NewProxyServiceClient(conn)
 	r, err := c.Download(ctx, &pb.DownloadRequest{
 		// The inconsistent capitalisation of 'URL' is because of https://github.com/golang/protobuf/issues/156
 		BackupUrl: *backupURL,
 	})
+	if err != nil {
+		panic(err)
+	}
+
 	err = conn.Close()
 	if err != nil {
 		panic(err)
 	}
+	fmt.Printf("Have backup file of size %d", len(r.Backup))
 
 	snapshotFilePath := filepath.Join(*snapshotDir, "snapshot.db")
 	fmt.Printf("Saving Object to local storage location %s\n", snapshotFilePath)

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"net/url"
 	"testing"
 )
 
@@ -27,4 +30,12 @@ func TestParseBackupURL(t *testing.T) {
 			assert.Equal(t, tt.path, actualPath)
 		})
 	}
+}
+
+func TestFoo(t *testing.T) {
+	u, err := url.Parse("proxy.eco-system.svc:8080")
+	fmt.Print(u)
+	u.Port()
+	require.NoError(t, err)
+	require.Equal(t, "proxy.eco-system.svc", u.Host)
 }

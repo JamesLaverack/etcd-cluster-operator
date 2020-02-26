@@ -2,9 +2,8 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"net/url"
 	"os"
+	"strings"
 
 	flag "github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,6 +28,7 @@ var (
 
 const (
 	defaultRestoreTimeoutSeconds = 300
+	defaultProxyPort             = 80
 )
 
 func init() {
@@ -43,7 +43,7 @@ func main() {
 	var enableLeaderElection bool
 	var printVersion bool
 	var restoreImageName string
-	var proxyURLString string
+	var proxyURL string
 
 	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
@@ -52,7 +52,7 @@ func main() {
 	flag.BoolVar(&printVersion, "version", false,
 		"Print version to stdout and exit")
 	flag.StringVar(&restoreImageName, "restore-image-name", "", "The Docker image to use to perform a restore")
-	flag.StringVar(&proxyURLString, "proxy-url", "", "The URL of the upload/download proxy")
+	flag.StringVar(&proxyURL, "proxy-url", "", "The URL of the upload/download proxy")
 	flag.Parse()
 
 	if printVersion {
@@ -64,9 +64,12 @@ func main() {
 
 	setupLog.Info("Starting manager", "version", version.Version)
 
-	proxyURL, err := url.Parse(proxyURLString)
-	if err != nil {
-		log.Fatal(err)
+	if !strings.Contains(proxyURL, ":") {
+		// gRPC needs a port, and this address doesn't seem to have one.
+		proxyURL = fmt.Sprintf("%s:%d", proxyURL, defaultProxyPort)
+		setupLog.Info("Defaulting port on configured Proxy URL",
+			"default-proxy-port", defaultProxyPort,
+			"proxy-url", proxyURL)
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -119,7 +122,7 @@ func main() {
 		Log:             ctrl.Log.WithName("controllers").WithName("EtcdRestore"),
 		Recorder:        mgr.GetEventRecorderFor("etcdrestore-reconciler"),
 		RestorePodImage: restoreImageName,
-		ProxyURL:        *proxyURL,
+		ProxyURL:        proxyURL,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EtcdRestore")
 		os.Exit(1)

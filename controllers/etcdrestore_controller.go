@@ -29,7 +29,7 @@ type EtcdRestoreReconciler struct {
 	Log             logr.Logger
 	Recorder        record.EventRecorder
 	RestorePodImage string
-	ProxyURL        url.URL
+	ProxyURL        string
 }
 
 // +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdrestores,verbs=get;list;watch
@@ -438,7 +438,7 @@ func (r *EtcdRestoreReconciler) podForRestore(restore etcdv1alpha1.EtcdRestore, 
 	stringFlag("etcd-data-dir", etcdDataMountPath)
 	stringFlag("snapshot-dir", snapshotDir)
 	stringFlag("backup-url", restore.Spec.Source.ObjectURL)
-	stringFlag("proxy-url", r.ProxyURL.String())
+	stringFlag("proxy-url", r.ProxyURL)
 	boolFlag("verbose")
 
 	markPod(restore, &pod)
