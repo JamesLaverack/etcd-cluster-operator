@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc"
 
 	pb "github.com/improbable-eng/etcd-cluster-operator/api/proxy/v1"
+	"github.com/improbable-eng/etcd-cluster-operator/version"
 )
 
 func main() {
@@ -58,17 +59,30 @@ func main() {
 		300,
 		"Timeout, in seconds, of the whole restore operation.")
 
+	printVersion := pflag.Bool("version",
+		false,
+		"Print version information and exit")
+
+	verbose := pflag.Bool("verbose", false, "Print out verbose information")
+
 	pflag.Parse()
 
-	fmt.Printf("Using etcd peer name %s\n", *etcdPeerName)
-	fmt.Printf("Using etcd cluster name %s\n", *etcdClusterName)
-	fmt.Printf("Using etcd initial cluster %s\n", *etcdInitialCluster)
-	fmt.Printf("Using advertise URL %s\n", *etcdAdvertiseURL)
-	fmt.Printf("Using etcd data directory %s\n", *etcdDataDir)
-	fmt.Printf("Using snapshot directory %s\n", *snapshotDir)
-	fmt.Printf("Using Bucket URL %s\n", *proxyURL)
-	fmt.Printf("Requesting backup from %s\n", *backupURL)
-	fmt.Printf("Using %d seconds timeout`n", timeoutSeconds)
+	if *verbose {
+		fmt.Printf("Using etcd peer name: %s\n", *etcdPeerName)
+		fmt.Printf("Using etcd cluster name: %s\n", *etcdClusterName)
+		fmt.Printf("Using etcd initial cluster: %s\n", *etcdInitialCluster)
+		fmt.Printf("Using etcd advertise URL: %s\n", *etcdAdvertiseURL)
+		fmt.Printf("Using etcd data directory: %s\n", *etcdDataDir)
+		fmt.Printf("Using snapshot directory: %s\n", *snapshotDir)
+		fmt.Printf("Using proxy URL: %s\n", *proxyURL)
+		fmt.Printf("Using backup URL: %s\n", *backupURL)
+		fmt.Printf("Using timeout: %d seconds\n", *timeoutSeconds)
+	}
+
+	if *printVersion {
+		fmt.Println(version.Version)
+		os.Exit(0)
+	}
 
 	// Pull the object from cloud storage into the snapshot directory.
 	ctx, ctxCancel := context.WithTimeout(context.Background(), time.Second*time.Duration(*timeoutSeconds))

@@ -120,7 +120,6 @@ func main() {
 		Recorder:        mgr.GetEventRecorderFor("etcdrestore-reconciler"),
 		RestorePodImage: restoreImageName,
 		ProxyURL:        *proxyURL,
-		TimeoutSeconds:  defaultRestoreTimeoutSeconds,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EtcdRestore")
 		os.Exit(1)

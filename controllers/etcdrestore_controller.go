@@ -30,7 +30,6 @@ type EtcdRestoreReconciler struct {
 	Recorder        record.EventRecorder
 	RestorePodImage string
 	ProxyURL        url.URL
-	TimeoutSeconds  int64
 }
 
 // +kubebuilder:rbac:groups=etcd.improbable.io,resources=etcdrestores,verbs=get;list;watch
@@ -425,21 +424,22 @@ func (r *EtcdRestoreReconciler) podForRestore(restore etcdv1alpha1.EtcdRestore, 
 	// Create a helper to append flags
 	stringFlag := func(flag string, value string) {
 		// We know there's only one container and it's the first in the list
-		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, fmt.Sprintf("--%s='%s'", flag, value))
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, fmt.Sprintf("--%s=%s", flag, value))
 	}
-	int64Flag := func(flag string, value int64) {
+	boolFlag := func(flag string) {
 		// We know there's only one container and it's the first in the list
-		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, fmt.Sprintf("--%s='%d'", flag, value))
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, fmt.Sprintf("--%s", flag))
 	}
 
 	stringFlag("etcd-peer-name", peer.Name)
-	stringFlag("etcd-cluster-name", restore.ClusterName)
+	stringFlag("etcd-cluster-name", restore.Spec.ClusterTemplate.ClusterName)
 	stringFlag("etcd-initial-cluster", staticBootstrapInitialCluster(*peer.Spec.Bootstrap.Static))
 	stringFlag("etcd-peer-advertise-url", advertiseURL(peer, etcdPeerPort).String())
 	stringFlag("etcd-data-dir", etcdDataMountPath)
 	stringFlag("snapshot-dir", snapshotDir)
+	stringFlag("backup-url", restore.Spec.Source.ObjectURL)
 	stringFlag("proxy-url", r.ProxyURL.String())
-	int64Flag("timeout-seconds", r.TimeoutSeconds)
+	boolFlag("verbose")
 
 	markPod(restore, &pod)
 	return &pod

@@ -39,6 +39,8 @@ func parseBackupURL(backupUrl string) (string, string, error) {
 }
 
 func (ps *proxyServer) Download(ctx context.Context, req *pb.DownloadRequest) (*pb.DownloadResponse, error) {
+	setupLog.Info("Downloading file %q", req.BackupUrl)
+
 	bucketName, objectPath, err := parseBackupURL(req.BackupUrl)
 	if err != nil {
 		return nil, err
@@ -60,6 +62,7 @@ func (ps *proxyServer) Download(ctx context.Context, req *pb.DownloadRequest) (*
 		return nil, err
 	}
 
+	setupLog.Info("Returning response with backup file size %d bytes", len(backup))
 	return &pb.DownloadResponse{Backup: backup}, nil
 }
 
